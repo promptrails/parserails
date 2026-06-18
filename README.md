@@ -4,6 +4,7 @@ Fast, light, **cgo-free** document parsing for Go. Spatial text extraction with
 bounding boxes, page screenshots, and pluggable OCR — no cloud, no LLM required.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/promptrails/parserails.svg)](https://pkg.go.dev/github.com/promptrails/parserails)
+[![CI](https://github.com/promptrails/parserails/actions/workflows/ci.yml/badge.svg)](https://github.com/promptrails/parserails/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 ParseRails is the Go counterpart to [run-llama/liteparse](https://github.com/run-llama/liteparse).
