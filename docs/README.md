@@ -2,6 +2,9 @@
 
 > Fast, light, cgo-free document parsing for Go.
 
+[![CI](https://github.com/promptrails/parserails/actions/workflows/ci.yml/badge.svg)](https://github.com/promptrails/parserails/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/promptrails/parserails.svg)](https://pkg.go.dev/github.com/promptrails/parserails)
+
 ParseRails extracts text **with spatial bounding boxes** from PDFs, renders page
 screenshots, and supports pluggable OCR — without cloud services, without an LLM,
 and without `CGO_ENABLED=1`.
