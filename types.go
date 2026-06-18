@@ -6,12 +6,14 @@ package parserails
 // matching what the PDFium text engine reports. X0,Y0 is the lower-left corner
 // and X1,Y1 the upper-right corner of the box.
 type Word struct {
-	Text     string  `json:"text"`
-	Page     int     `json:"page"`
-	X0       float64 `json:"x0"`
-	Y0       float64 `json:"y0"`
-	X1       float64 `json:"x1"`
-	Y1       float64 `json:"y1"`
+	Text string  `json:"text"`
+	Page int     `json:"page"`
+	X0   float64 `json:"x0"`
+	Y0   float64 `json:"y0"`
+	X1   float64 `json:"x1"`
+	Y1   float64 `json:"y1"`
+	// FontSize is the font size in points. It is 0 unless the parser was created
+	// with WithFontInfo (and GranularityWord).
 	FontSize float64 `json:"font_size,omitempty"`
 }
 
