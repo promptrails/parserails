@@ -38,6 +38,7 @@ type Parser struct {
 	ocr         OCR
 	granularity Granularity
 	fontInfo    bool
+	sofficeBin  string
 }
 
 // Option configures a Parser.
@@ -48,6 +49,7 @@ type config struct {
 	ocr                        OCR
 	granularity                Granularity
 	fontInfo                   bool
+	sofficeBin                 string
 }
 
 // WithOCR sets the OCR backend used as a fallback for pages with no extractable
@@ -66,6 +68,11 @@ func WithFontInfo() Option { return func(c *config) { c.fontInfo = true } }
 func WithPoolSize(minIdle, maxIdle, maxTotal int) Option {
 	return func(c *config) { c.minIdle, c.maxIdle, c.maxTotal = minIdle, maxIdle, maxTotal }
 }
+
+// WithLibreOffice sets an explicit LibreOffice binary path used to convert
+// office documents (DOCX/PPTX/XLSX/...) to PDF. By default ParseRails looks for
+// the PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
+func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin = path } }
 
 // New initializes a Parser backed by a pure-Go PDFium WebAssembly runtime.
 // No cgo and no system libraries are required. Call Close when finished.
@@ -88,6 +95,7 @@ func New(opts ...Option) (*Parser, error) {
 		ocr:         cfg.ocr,
 		granularity: cfg.granularity,
 		fontInfo:    cfg.fontInfo,
+		sofficeBin:  cfg.sofficeBin,
 	}, nil
 }
 
