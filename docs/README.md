@@ -30,18 +30,26 @@ ParseRails is the Go counterpart to [run-llama/liteparse](https://github.com/run
 
 ## Install
 
+Library:
+
 ```bash
 go get github.com/promptrails/parserails
 ```
 
-No system dependencies. Requires Go 1.26+.
+Command:
+
+```bash
+go install github.com/promptrails/parserails/cmd/parserails@latest
+```
+
+No system dependencies for PDF (Go 1.26+). Office formats need LibreOffice on
+PATH; OCR needs the `tesseract` binary when enabled.
 
 ## Quick Links
 
-- [Getting Started](getting-started.md)
-- [Spatial Text Extraction](parsing.md)
-- [OCR](ocr.md)
-- [Architecture](architecture.md)
-- [Benchmarks](benchmarks.md)
+- [Getting Started](getting-started.md) · [CLI](cli.md)
+- [Spatial Text Extraction](parsing.md) · [Page Screenshots](screenshots.md)
+- [OCR](ocr.md) · [Office Formats & Batches](office.md)
+- [Architecture](architecture.md) · [Benchmarks](benchmarks.md) · [Roadmap](roadmap.md)
 - [GitHub Repository](https://github.com/promptrails/parserails)
 - [Go Package Reference](https://pkg.go.dev/github.com/promptrails/parserails)

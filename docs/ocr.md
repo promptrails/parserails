@@ -51,9 +51,29 @@ tesseract.New(tesseract.Config{
 })
 ```
 
+## The HTTP backend
+
+`ocr/httpocr` delegates to a remote OCR server (EasyOCR/PaddleOCR-style). It POSTs
+the page as PNG and decodes a JSON response of pixel-space words:
+
+```go
+import "github.com/promptrails/parserails/ocr/httpocr"
+
+p, _ := parserails.New(parserails.WithOCR(httpocr.New(httpocr.Config{
+	URL:    "https://ocr.internal/recognize",
+	Header: http.Header{"Authorization": {"Bearer " + token}},
+})))
+```
+
+Server contract:
+
+```
+POST <URL>   body: image/png
+200 OK       body: {"words":[{"text":"hi","x0":1,"y0":2,"x1":3,"y1":4}]}
+```
+
 ## Writing your own
 
-Anything that turns an image into positioned words works — a remote OCR service,
-a different engine, a cloud API. Implement `Recognize`, return pixel-space boxes,
-and pass it to `WithOCR`. An HTTP adapter for remote OCR servers is on the
-[Roadmap](roadmap.md).
+Anything that turns an image into positioned words works — a different engine, a
+cloud API, a local model. Implement `Recognize`, return pixel-space boxes, and
+pass it to `WithOCR`.

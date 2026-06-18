@@ -28,17 +28,33 @@ actually need.
 | Page screenshot rendering (`RenderPage`) | PDFium (WASM) | ✅ |
 | Pluggable OCR + automatic fallback | interface | ✅ |
 | Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
-| HTTP OCR adapter | — | ⏳ Planned |
-| Office formats (DOCX/XLSX/PPTX) | excelize + LibreOffice headless | 🗺️ Roadmap |
-| CLI · batch parsing | — | 🗺️ Roadmap |
+| HTTP OCR adapter (remote OCR servers) | `net/http` | ✅ |
+| Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
+| Concurrent batch parsing | — | ✅ |
+| CLI (`go install`) | — | ✅ |
+| Native cgo build mode (hot paths) | — | 🗺️ Considering |
 
 ## Install
+
+As a library:
 
 ```bash
 go get github.com/promptrails/parserails
 ```
 
-No system dependencies. PDFium ships as a WASM module loaded at runtime via wazero.
+As a command:
+
+```bash
+go install github.com/promptrails/parserails/cmd/parserails@latest
+
+parserails parse  invoice.pdf          # extract text
+parserails parse  --json report.docx   # JSON, office docs via LibreOffice
+parserails render --dpi 150 doc.pdf    # render page 0 → doc-p0.png
+```
+
+No system dependencies for PDF. PDFium ships as a WASM module loaded at runtime
+via wazero. Office formats need `libreoffice`/`soffice` on PATH; OCR needs the
+`tesseract` binary (only when enabled).
 
 ## Usage
 
@@ -143,18 +159,22 @@ the pure-Go readers are far faster but give flat text only. See
 [`benchmark/README.md`](./benchmark/README.md) for numbers and the (important)
 caveats on what each library actually measures.
 
-## Roadmap
+## Files & batches
 
-- [x] PDFium WASM core: structured word/char extraction with boxes
-- [x] Word / line granularity, opt-in font size
-- [x] Page screenshot rendering (`RenderPage`)
-- [x] OCR fallback for scanned pages + cgo-free Tesseract adapter
-- [ ] HTTP OCR adapter (remote EasyOCR/PaddleOCR-style servers)
-- [ ] Office formats via LibreOffice headless + excelize
-- [ ] CLI (`parserails parse file.pdf`)
-- [ ] Batch parsing + concurrency controls
+```go
+doc, _ := p.ParseFile(ctx, "report.docx")           // PDF or office doc
+results := p.ParseFiles(ctx, paths, 4)               // concurrent batch
+```
 
-See [`docs/roadmap.md`](./docs/roadmap.md) for the full status table.
+`ParseFile` converts office documents to PDF via LibreOffice, then parses.
+`ParseFiles` runs a bounded-concurrency batch and captures per-file errors.
+
+## Status
+
+The PDF core and the full liteparse-style feature set (spatial text, rendering,
+OCR, office formats, CLI, batch) are implemented. See
+[`docs/roadmap.md`](./docs/roadmap.md) for the detailed status and what's still
+being considered (e.g. a native cgo build mode).
 
 ## License
 

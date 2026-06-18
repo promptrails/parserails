@@ -13,14 +13,15 @@ grows toward full liteparse parity. Status as of the current release:
 | Pluggable OCR interface | ✅ Done |
 | OCR fallback wiring (empty page → render → OCR) | ✅ Done |
 | Tesseract CLI OCR adapter (cgo-free) | ✅ Done |
-| HTTP OCR adapter | ⏳ Planned |
+| HTTP OCR adapter (remote servers) | ✅ Done |
+| Office formats (DOCX/PPTX/XLSX/...) via LibreOffice | ✅ Done |
+| `ParseFile` + concurrent `ParseFiles` batch | ✅ Done |
+| CLI (`parserails parse/render`, `go install`) | ✅ Done |
 | Render by pixel size (not just DPI) | ⏳ Planned |
-| Office formats (DOCX/XLSX/PPTX) via LibreOffice + excelize | 🗺️ Roadmap |
-| CLI (`parserails parse file.pdf`) | 🗺️ Roadmap |
-| Batch parsing + concurrency helpers | 🗺️ Roadmap |
 | Native cgo build mode (hot paths) | 🗺️ Considering |
+| Native XLSX cell extraction (without LibreOffice) | 🗺️ Considering |
 
-Legend: ✅ implemented · ⏳ planned, next up · 🗺️ on the roadmap, not started.
+Legend: ✅ implemented · ⏳ planned, next up · 🗺️ considering.
 
 ## Design principles
 
