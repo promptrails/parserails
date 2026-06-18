@@ -134,11 +134,36 @@ img, _ := p.RenderPage(ctx, pdf, parserails.RenderRequest{Page: 0, DPI: 150})
 png.Encode(out, img) // standard image.Image
 ```
 
+## Text-only fast path
+
+When you need just the text (RAG ingestion, search indexing) and not boxes, use
+`ExtractText` — it uses PDFium's whole-page text API (one call per page) and is
+several times cheaper than `Parse`:
+
+```go
+text, _ := p.ExtractText(ctx, pdf)        // plain string, no boxes
+text, _ = p.ExtractFileText(ctx, "x.docx") // PDF or office doc
+```
+
+## Backends: WASM (default) vs. native cgo
+
+Same API, two build-time backends:
+
+```bash
+go build .                       # PDFium as WASM — cgo-free, portable (default)
+go build -tags parserails_cgo .  # PDFium native — much faster/lighter, needs libpdfium
+```
+
+The default is cgo-free and needs no system libraries. The `parserails_cgo`
+backend links `libpdfium` for far higher throughput on controlled hosts (e.g. a
+Dockerized worker). `parserails.Backend` reports which is active. See
+[docs/architecture.md](./docs/architecture.md).
+
 ## Architecture
 
-- **cgo-free by default** — PDFium runs as WASM under wazero. Opt into a native
-  cgo build later if you need maximum throughput.
-- **Pooled runtime** — WASM instances are reused across requests (PDF parsing is
+- **cgo-free by default** — PDFium runs as WASM under wazero; opt into the native
+  `parserails_cgo` backend for maximum throughput.
+- **Pooled runtime** — instances are reused across requests (PDF parsing is
   CPU-bound); one pool per process.
 - **Layered** — `domain → parser → ocr → service`, mirroring the PromptRails
   service conventions so it drops cleanly into a standalone parse service.

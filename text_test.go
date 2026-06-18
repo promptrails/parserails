@@ -21,3 +21,9 @@ func TestExtractText(t *testing.T) {
 		t.Fatalf("text = %q, want it to contain %q", text, "Hello World")
 	}
 }
+
+func TestBackendDefault(t *testing.T) {
+	if Backend != "wasm" {
+		t.Fatalf("default Backend = %q, want %q", Backend, "wasm")
+	}
+}

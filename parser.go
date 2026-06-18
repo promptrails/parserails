@@ -10,7 +10,6 @@ import (
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/responses"
-	"github.com/klippa-app/go-pdfium/webassembly"
 )
 
 // Granularity controls how text is segmented into Words.
@@ -82,11 +81,7 @@ func New(opts ...Option) (*Parser, error) {
 		opt(&cfg)
 	}
 
-	pool, err := webassembly.Init(webassembly.Config{
-		MinIdle:  cfg.minIdle,
-		MaxIdle:  cfg.maxIdle,
-		MaxTotal: cfg.maxTotal,
-	})
+	pool, err := newPool(poolConfig{minIdle: cfg.minIdle, maxIdle: cfg.maxIdle, maxTotal: cfg.maxTotal})
 	if err != nil {
 		return nil, fmt.Errorf("parserails: init pdfium pool: %w", err)
 	}

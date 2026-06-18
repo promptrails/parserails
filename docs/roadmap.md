@@ -17,8 +17,9 @@ grows toward full liteparse parity. Status as of the current release:
 | Office formats (DOCX/PPTX/XLSX/...) via LibreOffice | ✅ Done |
 | `ParseFile` + concurrent `ParseFiles` batch | ✅ Done |
 | CLI (`parserails parse/render`, `go install`) | ✅ Done |
+| `ExtractText` whole-page text fast path | ✅ Done |
+| Native cgo backend (`-tags parserails_cgo`) | ✅ Done |
 | Render by pixel size (not just DPI) | ⏳ Planned |
-| Native cgo build mode (hot paths) | 🗺️ Considering |
 | Native XLSX cell extraction (without LibreOffice) | 🗺️ Considering |
 
 Legend: ✅ implemented · ⏳ planned, next up · 🗺️ considering.
