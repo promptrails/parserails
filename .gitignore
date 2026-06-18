@@ -11,3 +11,8 @@ coverage.html
 .DS_Store
 .idea/
 .vscode/
+
+# example binaries
+/examples/extract-text/extract-text
+/examples/parse-server/parse-server
+/examples/native-cgo/native-cgo
