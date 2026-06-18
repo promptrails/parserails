@@ -57,6 +57,29 @@ func BenchmarkParseRails(b *testing.B) {
 	}
 }
 
+// BenchmarkParseRailsLine — same engine, line/rect granularity (fast mode).
+func BenchmarkParseRailsLine(b *testing.B) {
+	p, err := parserails.New(parserails.WithGranularity(parserails.GranularityLine))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = p.Close() })
+
+	for _, name := range docs {
+		data := load(b, name)
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				doc, err := p.Parse(context.Background(), data)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_ = doc.Text()
+			}
+		})
+	}
+}
+
 // BenchmarkLedongthuc — pure-Go reader, plain text (no positions).
 func BenchmarkLedongthuc(b *testing.B) {
 	for _, name := range docs {

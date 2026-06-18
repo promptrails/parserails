@@ -19,19 +19,18 @@ keeps **spatial structure** — every word with its bounding box, page, and font
 which is what downstream RAG, table reconstruction, and LLM-vision pipelines
 actually need.
 
-## Status
-
-> Early scaffold. The API below is the target design; see the roadmap.
-
 ## Features
 
 | Capability | Engine | Status |
 |------------|--------|--------|
-| PDF text + word/char bounding boxes | PDFium (WASM) | Planned (core) |
-| Page → PNG/JPEG screenshot | PDFium (WASM) | Planned (core) |
-| Pluggable OCR (scanned PDFs/images) | Tesseract CLI or HTTP | Planned |
-| Office formats (DOCX/XLSX/PPTX) | excelite + LibreOffice headless | Roadmap |
-| Batch parsing | — | Roadmap |
+| PDF text + per-word bounding boxes | PDFium (WASM) | ✅ |
+| Word / line granularity, opt-in font size | PDFium (WASM) | ✅ |
+| Page screenshot rendering (`RenderPage`) | PDFium (WASM) | ✅ |
+| Pluggable OCR + automatic fallback | interface | ✅ |
+| Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
+| HTTP OCR adapter | — | ⏳ Planned |
+| Office formats (DOCX/XLSX/PPTX) | excelize + LibreOffice headless | 🗺️ Roadmap |
+| CLI · batch parsing | — | 🗺️ Roadmap |
 
 ## Install
 
@@ -41,7 +40,7 @@ go get github.com/promptrails/parserails
 
 No system dependencies. PDFium ships as a WASM module loaded at runtime via wazero.
 
-## Usage (target API)
+## Usage
 
 ```go
 package main
@@ -68,7 +67,7 @@ func main() {
 		panic(err)
 	}
 
-	for _, w := range doc.Words {
+	for _, w := range doc.Words() {
 		fmt.Printf("p%d %q [%.1f %.1f %.1f %.1f]\n",
 			w.Page, w.Text, w.X0, w.Y0, w.X1, w.Y1)
 	}
@@ -82,23 +81,42 @@ type Word struct {
 	Text           string
 	Page           int
 	X0, Y0, X1, Y1 float64 // bounding box, PDF user-space coordinates
-	FontSize       float64
+	FontSize       float64 // 0 unless New(WithFontInfo()) is used
 }
+```
+
+### Granularity
+
+Word-level boxes are precise but extract every character across the WASM
+boundary. For per-line boxes at ~6× the speed:
+
+```go
+p, _ := parserails.New(parserails.WithGranularity(parserails.GranularityLine))
 ```
 
 ## OCR (pluggable)
 
-Scanned/image-only pages have no extractable text. ParseRails detects empty pages
-and falls back to an OCR backend you provide:
+Scanned/image-only pages have no extractable text. ParseRails renders those pages
+and falls back to an OCR backend you provide — automatically:
 
 ```go
-type OCR interface {
-	Recognize(ctx context.Context, img image.Image) ([]Word, error)
-}
+import "github.com/promptrails/parserails/ocr/tesseract"
+
+p, _ := parserails.New(
+	parserails.WithOCR(tesseract.New(tesseract.Config{Lang: "eng"})),
+)
 ```
 
-Backends planned: a cgo-free `tesseract` CLI adapter (PNG → TSV with bboxes) and
-an HTTP adapter for remote OCR servers (EasyOCR/PaddleOCR-style).
+The bundled `ocr/tesseract` adapter shells out to the `tesseract` binary (no cgo,
+no `libtesseract`). Implement the one-method `OCR` interface for any other engine
+or a remote service. An HTTP adapter is on the roadmap.
+
+## Screenshots
+
+```go
+img, _ := p.RenderPage(ctx, pdf, parserails.RenderRequest{Page: 0, DPI: 150})
+png.Encode(out, img) // standard image.Image
+```
 
 ## Architecture
 
@@ -127,12 +145,16 @@ caveats on what each library actually measures.
 
 ## Roadmap
 
-- [ ] PDFium WASM core: structured word/char extraction
-- [ ] Page screenshot rendering (DPI / pixel size)
-- [ ] OCR fallback for scanned pages (Tesseract CLI adapter)
+- [x] PDFium WASM core: structured word/char extraction with boxes
+- [x] Word / line granularity, opt-in font size
+- [x] Page screenshot rendering (`RenderPage`)
+- [x] OCR fallback for scanned pages + cgo-free Tesseract adapter
+- [ ] HTTP OCR adapter (remote EasyOCR/PaddleOCR-style servers)
 - [ ] Office formats via LibreOffice headless + excelize
 - [ ] CLI (`parserails parse file.pdf`)
 - [ ] Batch parsing + concurrency controls
+
+See [`docs/roadmap.md`](./docs/roadmap.md) for the full status table.
 
 ## License
 

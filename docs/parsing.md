@@ -50,6 +50,29 @@ end the current word.
 This keeps extraction faithful to what is actually drawn on the page — no
 heuristic reflow, no guessing.
 
+> `FontSize` is `0` unless you opt in with `parserails.New(parserails.WithFontInfo())`.
+> Collecting per-character font metrics roughly doubles extraction cost, so it is
+> off by default.
+
+## Granularity: word vs. line
+
+Word-level grouping is precise but extracts every character across the Go↔WASM
+boundary. When per-line boxes are enough (RAG chunking, full-text search), switch
+to line granularity for a large speed and memory win:
+
+```go
+p, _ := parserails.New(parserails.WithGranularity(parserails.GranularityLine))
+```
+
+| Mode | Box precision | Relative cost |
+|------|---------------|---------------|
+| `GranularityWord` (default) | per word | baseline |
+| `GranularityLine` | per line / text rect | ~6× faster, ~25× fewer allocs |
+
+In line mode each `Word` spans a PDFium text rectangle (typically a line or run
+fragment) rather than a single word. See the [Benchmarks](benchmarks.md) for
+numbers.
+
 ## Working with pages
 
 ```go
