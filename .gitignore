@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+*.exe
+*.out
+
+# Test & coverage
+*.test
+*.coverprofile
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local scratch
+/tmp/
+*.local
