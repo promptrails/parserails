@@ -1,23 +1,13 @@
-# Binaries
-/bin/
 *.exe
-*.out
-
-# Test & coverage
+*.exe~
+*.dll
+*.so
+*.dylib
 *.test
-*.coverprofile
-coverage.txt
-
-# Go workspace
-go.work
-go.work.sum
-
-# OS / editor
+*.out
+*.prof
+coverage.out
+coverage.html
 .DS_Store
-*.swp
 .idea/
 .vscode/
-
-# Local scratch
-/tmp/
-*.local
