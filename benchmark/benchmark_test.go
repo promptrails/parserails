@@ -57,6 +57,28 @@ func BenchmarkParseRails(b *testing.B) {
 	}
 }
 
+// BenchmarkParseRailsText — plain-text-only fast path (no boxes), the
+// apples-to-apples comparison with the pure-text readers below.
+func BenchmarkParseRailsText(b *testing.B) {
+	p, err := parserails.New()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = p.Close() })
+
+	for _, name := range docs {
+		data := load(b, name)
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := p.ExtractText(context.Background(), data); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkParseRailsLine — same engine, line/rect granularity (fast mode).
 func BenchmarkParseRailsLine(b *testing.B) {
 	p, err := parserails.New(parserails.WithGranularity(parserails.GranularityLine))
