@@ -32,7 +32,8 @@ actually need.
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
-| Native cgo build mode (hot paths) | — | 🗺️ Considering |
+| `ExtractText` whole-page text fast path | PDFium | ✅ |
+| Native cgo backend (`-tags parserails_cgo`) | libpdfium | ✅ |
 
 ## Install
 
@@ -208,9 +209,10 @@ See [docs/examples.md](./docs/examples.md).
 ## Status
 
 The PDF core and the full liteparse-style feature set (spatial text, rendering,
-OCR, office formats, CLI, batch) are implemented. See
+OCR, office formats, CLI, batch) are implemented, with both a cgo-free WASM
+backend and a native `parserails_cgo` backend. See
 [`docs/roadmap.md`](./docs/roadmap.md) for the detailed status and what's still
-being considered (e.g. a native cgo build mode).
+being considered (e.g. native XLSX cell extraction without LibreOffice).
 
 ## License
 

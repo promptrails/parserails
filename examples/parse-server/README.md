@@ -32,7 +32,9 @@ Response:
 PDF parsing is cgo-free; the runtime image only adds `tesseract-ocr` (OCR) and
 `libreoffice-*` (office conversion) — the optional binaries those features call.
 
+Build from the repo root (so the `replace` directive resolves locally):
+
 ```bash
-docker build -t parserails-server .
+docker build -f examples/parse-server/Dockerfile -t parserails-server .
 docker run --rm -p 8080:8080 parserails-server
 ```

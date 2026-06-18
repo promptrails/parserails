@@ -27,8 +27,11 @@ The [Dockerfile](./Dockerfile) installs prebuilt
 [libpdfium](https://github.com/bblanchon/pdfium-binaries), writes a `pdfium.pc`
 for `pkg-config`, and builds with `CGO_ENABLED=1 -tags parserails_cgo`.
 
+Build from the repo root (so the `replace` directive resolves locally — no
+publishing required):
+
 ```bash
-docker build -t parserails-native .
+docker build -f examples/native-cgo/Dockerfile -t parserails-native .
 docker run --rm -v "$PWD:/data" parserails-native /data/sample.pdf
 ```
 

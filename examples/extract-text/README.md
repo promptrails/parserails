@@ -20,7 +20,10 @@ p0 "Benchmark"          ...
 The [Dockerfile](./Dockerfile) builds a fully static binary with `CGO_ENABLED=0`
 on `distroless/static` — no system libraries, because PDFium ships as WASM.
 
+Build from the repo root (the `replace` directive needs the parent source in
+context — no need to publish the module):
+
 ```bash
-docker build -t parserails-extract .
+docker build -f examples/extract-text/Dockerfile -t parserails-extract .
 docker run --rm -v "$PWD:/data" parserails-extract /data/sample.pdf
 ```

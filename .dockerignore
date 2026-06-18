@@ -1,0 +1,7 @@
+.git
+*.test
+coverage.out
+coverage.html
+examples/*/extract-text
+examples/*/parse-server
+examples/*/native-cgo

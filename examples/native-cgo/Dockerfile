@@ -1,6 +1,10 @@
 # Native PDFium build (-tags parserails_cgo). This image installs libpdfium and
 # builds with CGO enabled for maximum throughput. Compare with the cgo-free WASM
 # examples, which need none of this.
+#
+# Build from the REPO ROOT so the example's `replace => ../../` resolves locally
+# (no need to publish the module):
+#   docker build -f examples/native-cgo/Dockerfile -t parserails-native .
 FROM golang:1.26-bookworm AS build
 
 # --- Install libpdfium (prebuilt) -------------------------------------------
@@ -22,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --- Build ------------------------------------------------------------------
 WORKDIR /src
 COPY . .
+WORKDIR /src/examples/native-cgo
 RUN CGO_ENABLED=1 go build -tags parserails_cgo -o /bin/native-cgo .
 
 # --- Runtime ----------------------------------------------------------------
