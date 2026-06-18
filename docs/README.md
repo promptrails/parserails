@@ -47,7 +47,7 @@ PATH; OCR needs the `tesseract` binary when enabled.
 
 ## Quick Links
 
-- [Getting Started](getting-started.md) · [CLI](cli.md)
+- [Getting Started](getting-started.md) · [CLI](cli.md) · [Examples](examples.md)
 - [Spatial Text Extraction](parsing.md) · [Page Screenshots](screenshots.md)
 - [OCR](ocr.md) · [Office Formats & Batches](office.md)
 - [Architecture](architecture.md) · [Benchmarks](benchmarks.md) · [Roadmap](roadmap.md)

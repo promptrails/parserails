@@ -1,6 +1,7 @@
 - **Getting Started**
   - [Installation & Quick Start](getting-started.md)
   - [CLI](cli.md)
+  - [Examples](examples.md)
 
 - **Core**
   - [Spatial Text Extraction](parsing.md)

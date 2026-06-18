@@ -194,6 +194,17 @@ results := p.ParseFiles(ctx, paths, 4)               // concurrent batch
 `ParseFile` converts office documents to PDF via LibreOffice, then parses.
 `ParseFiles` runs a bounded-concurrency batch and captures per-file errors.
 
+## Examples
+
+Runnable, self-contained examples (each its own module + Dockerfile) live in
+[`examples/`](./examples):
+
+- [`extract-text`](./examples/extract-text) — the basics, fully static cgo-free binary
+- [`parse-server`](./examples/parse-server) — HTTP service with OCR + office support
+- [`native-cgo`](./examples/native-cgo) — native PDFium backend for max throughput
+
+See [docs/examples.md](./docs/examples.md).
+
 ## Status
 
 The PDF core and the full liteparse-style feature set (spatial text, rendering,
