@@ -109,6 +109,22 @@ an HTTP adapter for remote OCR servers (EasyOCR/PaddleOCR-style).
 - **Layered** — `domain → parser → ocr → service`, mirroring the PromptRails
   service conventions so it drops cleanly into a standalone parse service.
 
+## Benchmarks
+
+ParseRails is benchmarked against `ledongthuc/pdf`, `pdfcpu/pdfcpu`, and
+`unidoc/unipdf` in [`benchmark/`](./benchmark) — a **separate Go module**, so
+those (heavy, partly AGPL/commercial) dependencies never enter this module's
+graph.
+
+```bash
+cd benchmark && go test -bench=. -benchmem ./...
+```
+
+ParseRails is the only one of the four that returns per-word **bounding boxes**;
+the pure-Go readers are far faster but give flat text only. See
+[`benchmark/README.md`](./benchmark/README.md) for numbers and the (important)
+caveats on what each library actually measures.
+
 ## Roadmap
 
 - [ ] PDFium WASM core: structured word/char extraction
