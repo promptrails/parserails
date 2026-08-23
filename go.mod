@@ -1,6 +1,6 @@
 module github.com/promptrails/parserails
 
-go 1.26.4
+go 1.27.0
 
 require github.com/klippa-app/go-pdfium v1.19.4
 
