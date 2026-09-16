@@ -59,6 +59,8 @@ func (b *backend) Recognize(ctx context.Context, img image.Image) ([]parserails.
 		"--psm", strconv.Itoa(b.cfg.PSM),
 		"tsv",
 	}
+	// #nosec G204 -- b.cfg.Binary is the configured tesseract binary and args
+	// are built from literals and numeric config, never from document content.
 	cmd := exec.CommandContext(ctx, b.cfg.Binary, args...)
 	cmd.Stdin = &in
 	var out, stderr bytes.Buffer

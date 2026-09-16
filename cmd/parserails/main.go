@@ -142,6 +142,7 @@ func cmdRender(args []string) error {
 		return fmt.Errorf("render supports PDF only; convert %q first", src)
 	}
 
+	// #nosec G304 -- src is the path the operator typed on the command line.
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
@@ -161,6 +162,7 @@ func cmdRender(args []string) error {
 	if dst == "" {
 		dst = fmt.Sprintf("%s-p%d.png", strings.TrimSuffix(src, ".pdf"), *page)
 	}
+	// #nosec G304 -- dst is the output path the operator asked for.
 	f, err := os.Create(dst)
 	if err != nil {
 		return err

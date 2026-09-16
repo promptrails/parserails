@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  GOLANGCI_VERSION: v2.13.2
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -31,14 +34,30 @@ jobs:
           path: ~/go/bin
           key: go-tools-${{ runner.os }}-go1.27
 
+      # Pinned, both of them. `@latest` and `@master` mean the linters change
+      # under this repository whenever upstream releases — which is a build that
+      # fails on a morning nobody touched the code. It is not hypothetical: CI
+      # was green on 2026-08-23 and red on 2026-09-16 with no commit in between,
+      # because gosec grew a rule. Bumping these is now a Dependabot pull
+      # request that can be read, not a surprise.
       - name: Install golangci-lint
-        run: test -f ~/go/bin/golangci-lint || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+        run: |
+          set -euo pipefail
+          test -x ~/go/bin/golangci-lint && \
+            ~/go/bin/golangci-lint version 2>/dev/null | grep -q "${GOLANGCI_VERSION#v}" && exit 0
+          mkdir -p ~/go/bin
+          dir="golangci-lint-${GOLANGCI_VERSION#v}-linux-amd64"
+          curl -sSfL -o /tmp/golangci.tar.gz \
+            "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_VERSION}/${dir}.tar.gz"
+          tar -xzf /tmp/golangci.tar.gz -C /tmp
+          install -m 0755 "/tmp/${dir}/golangci-lint" ~/go/bin/golangci-lint
+          ~/go/bin/golangci-lint version
 
       - name: golangci-lint
         run: golangci-lint run ./...
 
       - name: gosec
-        uses: securego/gosec@master
+        uses: securego/gosec@v2.29.0
         with:
           args: -quiet ./...
 
