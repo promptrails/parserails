@@ -64,7 +64,16 @@ func renderInstance(inst pdfium.Pdfium, page requests.Page, dpi int) (img *image
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("parserails: render page: %w", err)
 	}
-	return res.Result.Image, res.Result.PointToPixelRatio, res.Cleanup, nil
+	// RenderedImage, not the deprecated Image field. It is declared as
+	// image.Image because the concrete type follows the requested format, so
+	// this asserts rather than assuming — and releases the WASM-side buffer
+	// before returning, since a caller that gets an error gets no cleanup func.
+	img, ok := res.Result.RenderedImage.(*image.RGBA)
+	if !ok {
+		res.Cleanup()
+		return nil, 0, nil, fmt.Errorf("parserails: render page: got %T, want *image.RGBA", res.Result.RenderedImage)
+	}
+	return img, res.Result.PointToPixelRatio, res.Cleanup, nil
 }
 
 func cloneRGBA(src *image.RGBA) *image.RGBA {
