@@ -54,6 +54,8 @@ func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) 
 	defer func() { _ = os.RemoveAll(tmp) }()
 
 	profile := filepath.Join(tmp, "profile")
+	// #nosec G204 -- bin is the configured LibreOffice binary, not user input;
+	// every argument below is a literal or a path this function just created.
 	cmd := exec.CommandContext(ctx, bin,
 		"--headless", "--norestore",
 		"-env:UserInstallation=file://"+profile,
@@ -67,6 +69,8 @@ func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) 
 
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	pdfPath := filepath.Join(tmp, base+".pdf")
+	// #nosec G304 -- pdfPath is built from a temp directory this function made
+	// moments ago; nothing outside chooses it.
 	data, err := os.ReadFile(pdfPath)
 	if err != nil {
 		return nil, fmt.Errorf("parserails: read converted pdf: %w", err)

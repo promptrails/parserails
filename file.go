@@ -17,6 +17,8 @@ func (p *Parser) ParseFile(ctx context.Context, path string) (*Document, error) 
 		}
 		return p.Parse(ctx, pdf)
 	}
+	// #nosec G304 -- `path` is this function's own API parameter: opening the
+	// file the caller names is the whole contract of a document parser.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("parserails: read file: %w", err)
