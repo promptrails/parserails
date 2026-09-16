@@ -1,0 +1,34 @@
+# Dependabot for this repository. Mirrors the monorepo / datarails / piperails
+# configs: minor and patch land in one grouped pull request per ecosystem per
+# week, majors get their own so they are easy to review and to revert.
+#
+# There was no config here at all, which is why the alert list grew to hundreds
+# with not one pull request open against it: alerts were on, updates were not.
+# Scheduled VERSION updates live in this file; grouped SECURITY updates are a
+# repository setting (Settings -> Code security), enabled alongside this.
+#
+# `directories` rather than `directory`: the examples are their own Go modules
+# and carry their own alerts, so a single entry covers the root and all three
+# instead of four entries competing for one group name.
+
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/examples/extract-text"
+      - "/examples/native-cgo"
+      - "/examples/parse-server"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Istanbul
+    open-pull-requests-limit: 10
+    groups:
+      gomod-minor-patch:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
