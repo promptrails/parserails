@@ -77,11 +77,14 @@ run "parserails <command> -h" for flags
 
 func cmdParse(args []string) error {
 	fs := flag.NewFlagSet("parse", flag.ExitOnError)
-	asJSON := fs.Bool("json", false, "output JSON instead of plain text")
+	format := fs.String("format", "text", "output format: text|json|markdown")
+	asJSON := fs.Bool("json", false, "shorthand for -format json")
 	gran := fs.String("granularity", "word", "segmentation: word|line")
 	font := fs.Bool("font", false, "collect font sizes (word granularity)")
 	ocrName := fs.String("ocr", "none", "OCR for scanned pages: none|tesseract")
 	lang := fs.String("lang", "eng", "OCR language")
+	keepFurniture := fs.Bool("keep-headers-footers", false,
+		"keep running headers and footers in markdown output")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: parserails parse [flags] <file>")
 		fs.PrintDefaults()
@@ -93,6 +96,14 @@ func cmdParse(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("expected exactly one input file")
 	}
+	if *asJSON {
+		*format = "json"
+	}
+	switch *format {
+	case "text", "json", "markdown":
+	default:
+		return fmt.Errorf("invalid -format %q (want text|json|markdown)", *format)
+	}
 
 	opts := []parserails.Option{}
 	switch strings.ToLower(*gran) {
@@ -102,8 +113,12 @@ func cmdParse(args []string) error {
 	default:
 		return fmt.Errorf("invalid -granularity %q (want word|line)", *gran)
 	}
-	if *font {
+	if *font || *format == "markdown" {
+		// Markdown ranks headings by size, so it always wants font metrics.
 		opts = append(opts, parserails.WithFontInfo())
+	}
+	if *format == "markdown" {
+		opts = append(opts, parserails.WithImages())
 	}
 	switch strings.ToLower(*ocrName) {
 	case "none":
@@ -124,17 +139,20 @@ func cmdParse(args []string) error {
 		return err
 	}
 
-	if *asJSON {
+	switch *format {
+	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(doc)
+	case "markdown":
+		_, err = fmt.Print(doc.MarkdownWith(parserails.BlockOptions{
+			KeepHeadersFooters: *keepFurniture,
+		}))
+		return err
+	default:
+		_, err = fmt.Println(doc.Text())
+		return err
 	}
-	for _, pg := range doc.Pages {
-		for _, w := range pg.Words {
-			fmt.Println(w.Text)
-		}
-	}
-	return nil
 }
 
 func cmdRender(args []string) error {

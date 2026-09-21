@@ -25,11 +25,7 @@ const (
 // images — a scanned table pasted into a report, a chart with labels, a
 // letterhead. Only those figure regions are rendered and recognized, so the
 // cost scales with the pictures, not with the page.
-func (p *Parser) ocrFigures(ctx context.Context, inst pdfium.Pdfium, page requests.Page, size pageSize, native []Word, pageIndex int) ([]Word, error) {
-	regions, err := pageImages(inst, page)
-	if err != nil {
-		return native, err
-	}
+func (p *Parser) ocrFigures(ctx context.Context, inst pdfium.Pdfium, page requests.Page, size pageSize, native []Word, pageIndex int, regions []ImageRegion) ([]Word, error) {
 	pageArea := size.Width * size.Height
 	figures := make([]ImageRegion, 0, len(regions))
 	for _, r := range regions {

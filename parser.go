@@ -43,6 +43,7 @@ type Parser struct {
 	password    string
 	maxPages    int
 	imageOCR    bool
+	images      bool
 }
 
 // Option configures a Parser.
@@ -57,6 +58,7 @@ type config struct {
 	password                   string
 	maxPages                   int
 	imageOCR                   bool
+	images                     bool
 }
 
 // WithOCR sets the OCR backend used as a fallback for pages with no extractable
@@ -89,6 +91,11 @@ func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin
 // off by default; it needs an OCR backend (WithOCR) to do anything.
 func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
 
+// WithImages records the raster figures on each page (Page.Images), so
+// Markdown output can place them and callers can crop them. It costs one call
+// per page object, so it is off by default; WithImageOCR implies it.
+func WithImages() Option { return func(c *config) { c.images = true } }
+
 // WithPassword sets the default password used to open encrypted documents. It
 // can be overridden per read with ReadOptions.Password.
 func WithPassword(password string) Option { return func(c *config) { c.password = password } }
@@ -118,6 +125,7 @@ func New(opts ...Option) (*Parser, error) {
 		password:    cfg.password,
 		maxPages:    cfg.maxPages,
 		imageOCR:    cfg.imageOCR,
+		images:      cfg.images || cfg.imageOCR,
 	}, nil
 }
 
@@ -225,6 +233,13 @@ func (p *Parser) parsePage(ctx context.Context, inst pdfium.Pdfium, docRef refer
 	}
 
 	dims := pageSize{Width: size.Width, Height: size.Height}
+	if p.images {
+		images, err := pageImages(inst, pageReq)
+		if err != nil {
+			return Page{}, err
+		}
+		page.Images = images
+	}
 	switch {
 	case len(page.Words) == 0:
 		// Scanned/image-only page: no extractable text. Fall back to OCR.
@@ -235,7 +250,7 @@ func (p *Parser) parsePage(ctx context.Context, inst pdfium.Pdfium, docRef refer
 		page.Words = ocrWords
 	case p.imageOCR && p.hasOCR():
 		// Text page with figures: read what the pictures say too.
-		words, err := p.ocrFigures(ctx, inst, pageReq, dims, page.Words, index)
+		words, err := p.ocrFigures(ctx, inst, pageReq, dims, page.Words, index, page.Images)
 		if err != nil {
 			return Page{}, err
 		}

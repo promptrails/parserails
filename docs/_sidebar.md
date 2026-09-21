@@ -6,6 +6,7 @@
 - **Core**
   - [Spatial Text Extraction](parsing.md)
   - [Format Detection](formats.md)
+  - [Blocks & Markdown](markdown.md)
   - [Page Screenshots](screenshots.md)
   - [OCR](ocr.md)
   - [Complexity & Routing](complexity.md)

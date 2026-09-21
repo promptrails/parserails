@@ -33,6 +33,10 @@ type Page struct {
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
 	Words  []Word  `json:"words"`
+	// Images are the raster figures drawn on the page. They are only collected
+	// when the parser was created with WithImages or WithImageOCR, since
+	// enumerating page objects costs a call per object.
+	Images []ImageRegion `json:"images,omitempty"`
 }
 
 // Document is the result of parsing one input file.

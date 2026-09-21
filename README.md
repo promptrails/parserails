@@ -39,6 +39,8 @@ actually need.
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |
+| Markdown output (headings, tables, lists, figures) | — | ✅ |
+| Layout blocks as data (`Blocks`) | — | ✅ |
 | Native cgo backend (`-tags parserails_cgo`) | libpdfium | ✅ |
 
 ## Install
@@ -57,6 +59,7 @@ go install github.com/promptrails/parserails/cmd/parserails@latest
 parserails parse      invoice.pdf      # extract text
 parserails parse      --json report.docx # JSON, office docs via LibreOffice
 parserails render     --dpi 150 doc.pdf  # render page 0 → doc-p0.png
+parserails parse      --format markdown doc.pdf # structured markdown
 parserails is-complex scan.pdf           # which pages need OCR?
 ```
 

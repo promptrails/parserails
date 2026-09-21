@@ -53,6 +53,18 @@ parserails render -o out.png doc.pdf          # explicit output path
 parserails version
 ```
 
+## `parserails parse --format`
+
+| Value | Output |
+|-------|--------|
+| `text` (default) | reconstructed plain text, lines and page breaks intact |
+| `json` | the full `Document`: pages, words, boxes |
+| `markdown` | [headings, tables, lists and figures](markdown.md) |
+
+`--format markdown` turns on font metrics and image collection by itself, since
+heading ranking and figure placement need them. `--keep-headers-footers` keeps
+running headers, footers and page numbers that are otherwise dropped.
+
 ## `parserails is-complex`
 
 Report, page by page, whether a document needs OCR. Per-page JSON goes to
