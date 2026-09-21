@@ -195,6 +195,34 @@ func TestOfficeTextKeepsColumnPositions(t *testing.T) {
 	}
 }
 
+func TestPPTXFollowsPresentationOrderNotFileNames(t *testing.T) {
+	slide := func(title string) []byte {
+		return []byte(`<p:sld xmlns:a="x"><a:p><a:r><a:t>` + title + `</a:t></a:r></a:p></p:sld>`)
+	}
+	// The deck was reordered in PowerPoint: slide2.xml comes first now, and
+	// the part names did not change.
+	pptx := zipArchive(map[string][]byte{
+		"ppt/presentation.xml": []byte(`<p:presentation xmlns:r="x"><p:sldIdLst>` +
+			`<p:sldId id="257" r:id="rId2"/><p:sldId id="256" r:id="rId1"/>` +
+			`</p:sldIdLst></p:presentation>`),
+		"ppt/_rels/presentation.xml.rels": []byte(`<Relationships>` +
+			`<Relationship Id="rId1" Target="slides/slide1.xml"/>` +
+			`<Relationship Id="rId2" Target="slides/slide2.xml"/>` +
+			`</Relationships>`),
+		"ppt/slides/slide1.xml": slide("Originally first"),
+		"ppt/slides/slide2.xml": slide("Moved to the front"),
+	})
+
+	doc, err := ReadOfficeDocument(pptx, FormatPPTX)
+	if err != nil {
+		t.Fatalf("ReadOfficeDocument: %v", err)
+	}
+	text := doc.Text()
+	if strings.Index(text, "Moved to the front") > strings.Index(text, "Originally first") {
+		t.Fatalf("slides read in file-name order:\n%s", text)
+	}
+}
+
 func TestNativeOfficeTextNeedsNoLibreOffice(t *testing.T) {
 	docx := zipArchive(map[string][]byte{
 		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body>` +

@@ -375,7 +375,7 @@ func worksheets(zr *zip.Reader) []worksheet {
 			continue
 		}
 		name := attr(start, "name")
-		target := rels[attr(start, "id")]
+		target := rels[relID(start)]
 		if target == "" {
 			continue
 		}
@@ -571,16 +571,13 @@ func columnIndex(ref string) int {
 	return col - 1
 }
 
-// pptxBlocks reads each slide in order: its first text is the title, the rest
-// is body text.
+// pptxBlocks reads each slide in presentation order: its first text is the
+// title, the rest is body text.
 func pptxBlocks(zr *zip.Reader) ([]Block, error) {
-	var slides []string
-	for _, f := range zr.File {
-		if strings.HasPrefix(f.Name, "ppt/slides/slide") && strings.HasSuffix(f.Name, ".xml") {
-			slides = append(slides, f.Name)
-		}
+	slides := slideOrder(zr)
+	if len(slides) == 0 {
+		slides = slidesByName(zr) // no presentation part: fall back to names
 	}
-	sort.Slice(slides, func(i, j int) bool { return slideNumber(slides[i]) < slideNumber(slides[j]) })
 
 	var blocks []Block
 	for _, name := range slides {
@@ -598,6 +595,49 @@ func pptxBlocks(zr *zip.Reader) ([]Block, error) {
 		}
 	}
 	return blocks, nil
+}
+
+// slideOrder resolves the presentation's own slide order.
+//
+// Part names do not carry it: moving a slide in PowerPoint rewrites the
+// <p:sldIdLst> in presentation.xml and leaves slide3.xml called slide3.xml, so
+// sorting by file name reads a reordered deck in the wrong order.
+func slideOrder(zr *zip.Reader) []string {
+	rels := relationships(zr, "ppt/_rels/presentation.xml.rels")
+	data, err := zipEntry(zr, "ppt/presentation.xml")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok || start.Name.Local != "sldId" {
+			continue
+		}
+		target := rels[relID(start)]
+		if target == "" {
+			continue
+		}
+		out = append(out, normalizePart("ppt", target))
+	}
+	return out
+}
+
+// slidesByName lists the slide parts in numeric file-name order.
+func slidesByName(zr *zip.Reader) []string {
+	var slides []string
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "ppt/slides/slide") && strings.HasSuffix(f.Name, ".xml") {
+			slides = append(slides, f.Name)
+		}
+	}
+	sort.Slice(slides, func(i, j int) bool { return slideNumber(slides[i]) < slideNumber(slides[j]) })
+	return slides
 }
 
 func slideNumber(name string) int {
@@ -650,6 +690,23 @@ func mostlyFilled(row []Cell) bool {
 		}
 	}
 	return len(row) > 0 && filled*2 >= len(row)
+}
+
+// relID returns an element's r:id relationship reference. It cannot just look
+// for "id": a <p:sldId> carries both a plain id="256" and the r:id="rId2" that
+// actually names the part, and both have the local name "id".
+func relID(e xml.StartElement) string {
+	for _, a := range e.Attr {
+		if a.Name.Local == "id" && a.Name.Space != "" {
+			return a.Value
+		}
+	}
+	for _, a := range e.Attr {
+		if a.Name.Local == "id" && strings.HasPrefix(a.Value, "rId") {
+			return a.Value
+		}
+	}
+	return ""
 }
 
 func attr(e xml.StartElement, name string) string {
