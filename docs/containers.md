@@ -98,3 +98,22 @@ p, _ := parserails.New(parserails.WithContainer(parserails.FormatZIP, tarContain
 
 `WithContainer` also replaces a built-in one — or, with a container that
 returns nothing, switches unpacking off for a format.
+
+```go
+type Container interface {
+	Children(ctx context.Context, data []byte, req ChildRequest) ([]Child, error)
+}
+
+type Child struct {
+	Name string
+	Data []byte
+	Err  error // found but not taken: corrupt, or over the remaining budget
+}
+
+type ChildRequest struct {
+	Name     string // the containing file's name
+	Password string // for an encrypted container
+	MaxFiles int    // what is left of the walk's budget; 0 means no limit
+	MaxBytes int64
+}
+```

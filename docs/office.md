@@ -36,7 +36,7 @@ a throwaway LibreOffice user profile, so concurrent conversions don't collide.
 captures per-file errors instead of aborting the batch.
 
 ```go
-results := p.ParseFiles(ctx, paths, 4) // up to 4 at once
+results := p.ParseFiles(ctx, paths, 4) // up to 4 at once, []FileResult
 for _, r := range results {
 	if r.Err != nil {
 		log.Printf("%s: %v", r.Path, r.Err)
@@ -61,6 +61,13 @@ directly instead.
 office, err := parserails.ReadOfficeDocument(data, parserails.FormatDOCX)
 fmt.Println(office.Text())
 fmt.Println(office.Markdown())
+```
+
+```go
+type OfficeDocument struct {
+	Format Format
+	Blocks []Block // the same blocks as Markdown output, without boxes
+}
 ```
 
 Or let the parser prefer it wherever text is what is being asked for —

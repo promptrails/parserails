@@ -19,11 +19,28 @@ and unusual layouts are where it frays.
 
 ## Blocks
 
-Markdown is rendered from a block decomposition you can take as data instead:
+Markdown is rendered from a block decomposition you can take as data instead —
+`Blocks()` with the defaults, `BlocksWith(BlockOptions{…})` to tune it:
 
 ```go
 for _, b := range doc.Blocks() {
 	fmt.Printf("%-10s p%d %q\n", b.Kind, b.Page, b.Text)
+}
+```
+
+```go
+type Block struct {
+	Kind           BlockKind // heading | paragraph | list_item | table | figure
+	Page           int
+	X0, Y0, X1, Y1 float64
+
+	Text    string   // heading, paragraph, list item
+	Level   int      // heading depth, 1-6
+	Ordered bool     // list item
+	Marker  string   // the bullet or number as written
+	Header  []Cell   // table
+	Rows    [][]Cell
+	ID      string   // figure, e.g. "img_p1_2"
 }
 ```
 
@@ -62,6 +79,10 @@ and the same text size. A line ending in `-` is rejoined without it.
 **List items** start with a bullet (`•`, `-`, `*`, …) or an enumerator
 (`1.`, `2)`, `a.`). Wrapped continuation lines are folded in by their hanging
 indent.
+
+A table cell that held several paragraphs keeps the break as `<br>`: a pipe
+table cannot contain a newline, and joining the paragraphs without one would
+invent words that are in no document.
 
 **Tables** are borderless-first: PDFium reports no ruling lines, so a table is
 several consecutive lines whose words line up in the same columns. Cells are

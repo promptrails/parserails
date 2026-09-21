@@ -112,6 +112,14 @@ for _, l := range doc.Lines() {
 }
 ```
 
+```go
+type Line struct {
+	Page           int
+	X0, Y0, X1, Y1 float64 // the union of the words' boxes
+	Words          []Word
+}
+```
+
 | Method | Returns |
 |--------|---------|
 | `doc.Lines()` | every page's lines, in page order |
@@ -172,3 +180,21 @@ An encrypted document opened without a password fails with an error that says
 so (`document is encrypted`), and a wrong password says `wrong password` —
 rather than surfacing PDFium's numeric code. `RenderPage` takes the password
 too, via `RenderRequest.Password`.
+
+## Figures on a page
+
+`Page.Images` lists the raster figures PDFium reports, each an `ImageRegion`
+with its box in the same coordinates:
+
+```go
+p, _ := parserails.New(parserails.WithImages())
+doc, _ := p.Parse(ctx, pdf)
+
+for _, img := range doc.Pages[0].Images {
+	fmt.Printf("figure %d covers %.0f square points\n", img.Index, img.Area())
+}
+```
+
+It is opt-in because enumerating page objects costs a call per object.
+`WithImageOCR` turns it on by itself, and [Markdown output](markdown.md) uses
+it to place figures.

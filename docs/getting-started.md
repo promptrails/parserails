@@ -6,7 +6,7 @@
 go get github.com/promptrails/parserails
 ```
 
-Requires Go 1.26 or later. There are **no system dependencies** — PDFium ships as
+Requires Go 1.27 or later. There are **no system dependencies** — PDFium ships as
 a WebAssembly module that is loaded at runtime by [wazero](https://wazero.io), so
 you do not need `CGO_ENABLED=1`, a C toolchain, or a `libpdfium.so` on the host.
 
@@ -75,3 +75,20 @@ p, _ := parserails.New(
 	parserails.WithPoolSize(2, 4, 8), // minIdle, maxIdle, maxTotal
 )
 ```
+
+## Where to go next
+
+The quick start above is the spatial core. The rest of the library is about
+what arrives around a PDF:
+
+| You want | Read |
+|----------|------|
+| text with its lines and pages intact | [Spatial Text Extraction](parsing.md) |
+| headings, tables and lists for an LLM | [Blocks & Markdown](markdown.md) |
+| to know whether a document needs OCR | [Complexity & Routing](complexity.md) |
+| to read scans, or figures inside reports | [OCR](ocr.md), [Images as Input](images.md) |
+| Word/Excel/PowerPoint, with or without LibreOffice | [Office Formats & Batches](office.md) |
+| what is inside a ZIP, an e-mail, an attachment | [Containers](containers.md) |
+| to identify what a byte slice even is | [Format Detection](formats.md) |
+| the command line | [CLI](cli.md) |
+| every exported name in one place | [API Reference](api.md) |

@@ -15,6 +15,7 @@
   - [Containers: files inside files](containers.md)
 
 - **Reference**
+  - [API Reference](api.md)
   - [Architecture](architecture.md)
   - [Benchmarks](benchmarks.md)
   - [Roadmap](roadmap.md)
