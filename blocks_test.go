@@ -200,7 +200,7 @@ func TestFigureBlocksArePlacedInReadingOrder(t *testing.T) {
 	if above < 0 || figure < 0 || below < 0 {
 		t.Fatalf("markdown missing pieces:\n%s", md)
 	}
-	if !(above < figure && figure < below) {
+	if above > figure || figure > below {
 		t.Errorf("figure out of order:\n%s", md)
 	}
 }

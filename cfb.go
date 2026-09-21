@@ -261,7 +261,8 @@ func (f *cfbFile) streams() []cfbStream {
 	visited := make(map[uint32]bool)
 	var walk func(id uint32, prefix string)
 	walk = func(id uint32, prefix string) {
-		if id >= uint32(len(f.entries)) || visited[id] {
+		// Compared in uint64 so a corrupt 32-bit id cannot wrap into range.
+		if uint64(id) >= uint64(len(f.entries)) || visited[id] {
 			return
 		}
 		visited[id] = true

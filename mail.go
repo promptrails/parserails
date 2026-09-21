@@ -73,10 +73,10 @@ func walkMailPart(contentType, encoding string, body io.Reader) (string, []Child
 		return "", nil, fmt.Errorf("parserails: read mail part: %w", err)
 	}
 	decoded := decodeTransfer(raw, encoding)
-	switch {
-	case mediaType == "text/plain":
+	switch mediaType {
+	case "text/plain":
 		return string(decoded), nil, nil
-	case mediaType == "text/html":
+	case "text/html":
 		return stripHTML(string(decoded)), nil, nil
 	default:
 		return "", []Child{{Name: "part", Data: decoded}}, nil

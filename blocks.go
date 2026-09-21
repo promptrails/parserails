@@ -354,8 +354,6 @@ func readsAsColumn(lines []Line) bool {
 // gutter is a vertical band of a page that no word occupies.
 type gutter struct{ start, end float64 }
 
-func (g gutter) mid() float64 { return (g.start + g.end) / 2 }
-
 // splitLineAt cuts a line into its part left of the gutter and its part right
 // of it. It fails if a word straddles the gutter, which means this is not a
 // gutter for this line.
