@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestSniff(t *testing.T) {
 		{"jpeg", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00}, FormatJPEG},
 		{"gif", []byte("GIF89a...."), FormatGIF},
 		{"tiff", []byte("II*\x00...."), FormatTIFF},
-		{"bmp", []byte("BM\x00\x00\x00"), FormatBMP},
+		{"bmp", bmpHeader(), FormatBMP},
 		{"webp", []byte("RIFF\x00\x00\x00\x00WEBPVP8 "), FormatWEBP},
 		{"ole", append(append([]byte{}, oleMagic...), 0x00, 0x01), FormatOLE},
 		{"rtf", []byte(`{\rtf1\ansi hello}`), FormatRTF},
@@ -40,6 +41,26 @@ func TestSniff(t *testing.T) {
 				t.Fatalf("Sniff(%s) = %s, want %s", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSniffDoesNotMistakeTextForBinary(t *testing.T) {
+	// Two ASCII letters are not a format. These all used to sniff wrong.
+	cases := map[string]string{
+		"report.csv": "BMI,weight\n22,70\n",
+		"memo.txt":   "From the desk of the CFO, a note about Q3.",
+		"notes.md":   "BM is short for body mass, as everyone knows.",
+	}
+	for name, body := range cases {
+		if got := Detect(name, []byte(body)); got != FormatText {
+			t.Errorf("Detect(%s) = %s, want txt", name, got)
+		}
+	}
+
+	// A real mbox file still is one.
+	mbox := "From someone@example.com Mon Jan  1 00:00:00 2024\r\nFrom: a@b.c\r\nSubject: hi\r\n\r\nbody"
+	if got := Detect("inbox", []byte(mbox)); got != FormatEML {
+		t.Errorf("Detect(mbox) = %s, want eml", got)
 	}
 }
 
@@ -135,6 +156,17 @@ func TestParseFileDetectsPDFByContent(t *testing.T) {
 	if got := doc.Text(); got != "Hello" {
 		t.Fatalf("text = %q, want %q", got, "Hello")
 	}
+}
+
+// bmpHeader builds a minimal but coherent BMP header: signature, size,
+// zeroed reserved words, pixel offset and a 40-byte DIB header.
+func bmpHeader() []byte {
+	out := make([]byte, 54)
+	copy(out, "BM")
+	binary.LittleEndian.PutUint32(out[2:6], 54)
+	binary.LittleEndian.PutUint32(out[10:14], 54)
+	binary.LittleEndian.PutUint32(out[14:18], 40)
+	return out
 }
 
 // ooxmlZip builds a ZIP archive containing a single named entry.

@@ -3,6 +3,7 @@ package parserails
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -146,7 +147,7 @@ func Sniff(data []byte) Format {
 		return FormatGIF
 	case bytes.HasPrefix(data, []byte("II*\x00")), bytes.HasPrefix(data, []byte("MM\x00*")):
 		return FormatTIFF
-	case bytes.HasPrefix(data, []byte("BM")):
+	case isBMP(data):
 		return FormatBMP
 	case len(data) >= 12 && bytes.HasPrefix(data, []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")):
 		return FormatWEBP
@@ -170,6 +171,29 @@ func Sniff(data []byte) Format {
 		return FormatText
 	}
 	return FormatUnknown
+}
+
+// isBMP reports whether the data is a Windows bitmap.
+//
+// "BM" is two ASCII letters, so the signature alone claims every CSV that
+// starts with a BMI column. The rest of the header has to agree: the reserved
+// words are zero, the pixel data starts at a plausible offset, and the DIB
+// header has one of its defined sizes.
+func isBMP(data []byte) bool {
+	if len(data) < 26 || !bytes.HasPrefix(data, []byte("BM")) {
+		return false
+	}
+	if binary.LittleEndian.Uint32(data[6:10]) != 0 { // two reserved words
+		return false
+	}
+	if offset := binary.LittleEndian.Uint32(data[10:14]); offset < 26 || offset > 1<<20 {
+		return false
+	}
+	switch binary.LittleEndian.Uint32(data[14:18]) { // DIB header size
+	case 12, 16, 40, 52, 56, 64, 108, 124:
+		return true
+	}
+	return false
 }
 
 // oleMagic is the Compound File Binary header signature.
@@ -240,8 +264,11 @@ func looksLikeEmail(data []byte) bool {
 	if len(head) > sniffLimit {
 		head = head[:sniffLimit]
 	}
-	if bytes.HasPrefix(head, []byte("From ")) { // mbox "From " separator line
-		return true
+	// An mbox "From " separator, not a memo that opens "From the desk of…":
+	// the line after a real separator is a header.
+	if bytes.HasPrefix(head, []byte("From ")) {
+		_, rest, found := bytes.Cut(head, []byte("\n"))
+		return found && startsWithHeaderLine(rest)
 	}
 	if !bytes.Contains(head, []byte("MIME-Version:")) && !bytes.Contains(head, []byte("Content-Type:")) {
 		// A message without either is still a message, but only if it opens
