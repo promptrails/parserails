@@ -98,6 +98,8 @@ func (p *Parser) Inspect(ctx context.Context, data []byte, opt ReadOptions) (*Co
 			return nil, err
 		}
 		data = pdf
+	case format.IsImage():
+		return imageComplexity(), nil
 	default:
 		return nil, unparsableError(opt.Name, format)
 	}
@@ -118,10 +120,26 @@ func (p *Parser) InspectFile(ctx context.Context, path string) (*Complexity, err
 			return nil, err
 		}
 		data = pdf
+	case format.IsImage():
+		return imageComplexity(), nil
 	default:
 		return nil, unparsableError(path, format)
 	}
 	return p.inspectPDF(ctx, data, ReadOptions{Name: path})
+}
+
+// imageComplexity is the verdict for a standalone raster: it is a scan by
+// definition, and nothing but OCR will read it.
+func imageComplexity() *Complexity {
+	return &Complexity{Pages: []PageComplexity{{
+		Page:                 0,
+		ImageCount:           1,
+		ImageCoverage:        1,
+		LargestImageCoverage: 1,
+		FullPageImage:        true,
+		NeedsOCR:             true,
+		Reasons:              []string{ReasonScanned},
+	}}}
 }
 
 func (p *Parser) inspectPDF(ctx context.Context, data []byte, opt ReadOptions) (*Complexity, error) {

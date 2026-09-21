@@ -9,6 +9,7 @@
   - [Page Screenshots](screenshots.md)
   - [OCR](ocr.md)
   - [Complexity & Routing](complexity.md)
+  - [Images as Input](images.md)
   - [Office Formats & Batches](office.md)
 
 - **Reference**

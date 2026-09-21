@@ -38,6 +38,12 @@ func (p *Parser) ExtractTextData(ctx context.Context, data []byte, opt ReadOptio
 			return "", err
 		}
 		return p.extractPDFText(ctx, pdf, opt)
+	case format.IsImage():
+		doc, err := p.ParseImage(ctx, data)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
 	default:
 		return "", unparsableError(opt.Name, format)
 	}
@@ -104,6 +110,12 @@ func (p *Parser) ExtractFileText(ctx context.Context, path string) (string, erro
 			return "", err
 		}
 		return p.extractPDFText(ctx, pdf, ReadOptions{Name: path})
+	case format.IsImage():
+		doc, err := p.ParseImage(ctx, data)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
 	default:
 		return "", unparsableError(path, format)
 	}

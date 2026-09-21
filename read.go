@@ -59,6 +59,8 @@ func (p *Parser) ParseData(ctx context.Context, data []byte, opt ReadOptions) (*
 			return nil, err
 		}
 		return p.parsePDF(ctx, pdf, opt)
+	case format.IsImage():
+		return p.ParseImage(ctx, data)
 	default:
 		return nil, unparsableError(opt.Name, format)
 	}
@@ -83,6 +85,8 @@ func (p *Parser) ParseFile(ctx context.Context, path string) (*Document, error) 
 			return nil, err
 		}
 		return p.parsePDF(ctx, pdf, opt)
+	case format.IsImage():
+		return p.ParseImage(ctx, data)
 	default:
 		return nil, unparsableError(path, format)
 	}
