@@ -136,7 +136,7 @@ func Sniff(data []byte) Format {
 		return FormatUnknown
 	}
 	switch {
-	case hasPDFHeader(data):
+	case bytes.HasPrefix(data, pdfMagic):
 		return FormatPDF
 	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
 		return FormatPNG
@@ -157,6 +157,12 @@ func Sniff(data []byte) Format {
 	case bytes.HasPrefix(data, []byte("PK\x03\x04")):
 		return sniffZip(data)
 	}
+	// A PDF whose header is not at byte 0 — leading junk happens, and PDFium
+	// accepts it. This runs only after every exact signature above, because a
+	// ZIP that stores a PDF uncompressed also has "%PDF-" near its start.
+	if hasLatePDFHeader(data) {
+		return FormatPDF
+	}
 	if looksLikeEmail(data) {
 		return FormatEML
 	}
@@ -169,14 +175,15 @@ func Sniff(data []byte) Format {
 // oleMagic is the Compound File Binary header signature.
 var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
-// hasPDFHeader looks for %PDF near the start. The spec puts it at byte 0, but
-// files with leading junk are common and PDFium accepts them.
-func hasPDFHeader(data []byte) bool {
+var pdfMagic = []byte("%PDF-")
+
+// hasLatePDFHeader looks for the PDF header past byte 0.
+func hasLatePDFHeader(data []byte) bool {
 	head := data
 	if len(head) > 1024 {
 		head = head[:1024]
 	}
-	return bytes.Contains(head, []byte("%PDF-"))
+	return bytes.Contains(head, pdfMagic)
 }
 
 // sniffZip distinguishes the ZIP-based document formats by their package

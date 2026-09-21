@@ -12,6 +12,7 @@
   - [Complexity & Routing](complexity.md)
   - [Images as Input](images.md)
   - [Office Formats & Batches](office.md)
+  - [Containers: files inside files](containers.md)
 
 - **Reference**
   - [Architecture](architecture.md)

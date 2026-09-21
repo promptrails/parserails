@@ -65,6 +65,19 @@ parserails version
 heading ranking and figure placement need them. `--keep-headers-footers` keeps
 running headers, footers and page numbers that are otherwise dropped.
 
+## `parserails extract`
+
+Walk a file and everything inside it — see [Containers](containers.md).
+
+| Flag | Meaning |
+|------|---------|
+| `--format` | `tree` (default), `text`, `json` |
+| `--max-depth` | how deep to descend (0 = default 8, -1 = no limit) |
+| `--max-files` | cap how many files are opened (0 = default 512) |
+| `--list` | inventory only; do not parse the documents |
+| `--ocr`, `--lang` | OCR backend for scanned pages and image attachments |
+| `--password` | password for encrypted documents |
+
 ## `parserails is-complex`
 
 Report, page by page, whether a document needs OCR. Per-page JSON goes to

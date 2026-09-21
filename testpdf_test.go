@@ -122,6 +122,45 @@ func minimalPDF(text string) []byte {
 	return pdfWithRuns(textRun{Text: text, X: 100, Y: 700, Size: 24})
 }
 
+// pdfWithAttachment builds a single-page PDF carrying an embedded file, the
+// way an e-invoice carries its XML.
+func pdfWithAttachment(name string, payload []byte) []byte {
+	content := "BT /F1 12 Tf 72 700 Td (Cover page) Tj ET\n"
+	objects := []string{
+		fmt.Sprintf("<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles "+
+			"<< /Names [(%s) 6 0 R] >> >> >>", name),
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] /Contents 4 0 R "+
+			"/Resources << /Font << /F1 5 0 R >> >> >>", testPageWidth, testPageHeight),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(content), content),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Type /Filespec /F (%s) /UF (%s) /EF << /F 7 0 R >> >>", name, name),
+		fmt.Sprintf("<< /Type /EmbeddedFile /Length %d >>\nstream\n%s\nendstream",
+			len(payload), payload),
+	}
+	return assemblePDF(objects)
+}
+
+// assemblePDF writes numbered objects with a real xref table.
+func assemblePDF(objects []string) []byte {
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objects)+1)
+	for i, body := range objects {
+		offsets[i+1] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n", len(objects)+1)
+	b.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= len(objects); i++ {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offsets[i])
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF",
+		len(objects)+1, xref)
+	return []byte(b.String())
+}
+
 func escapePDFString(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`)
 	return r.Replace(s)

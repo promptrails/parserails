@@ -36,6 +36,7 @@ actually need.
 | Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
 | Encrypted PDFs, page ranges (`ReadOptions`) | PDFium | ✅ |
 | Complexity routing (`Inspect`, `is-complex`) | PDFium | ✅ |
+| Recursive containers (ZIP/EML/MSG/OLE/attachments) | — | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |
@@ -61,6 +62,7 @@ parserails parse      --json report.docx # JSON, office docs via LibreOffice
 parserails render     --dpi 150 doc.pdf  # render page 0 → doc-p0.png
 parserails parse      --format markdown doc.pdf # structured markdown
 parserails is-complex scan.pdf           # which pages need OCR?
+parserails extract    bundle.zip         # walk everything inside a file
 ```
 
 No system dependencies for PDF. PDFium ships as a WASM module loaded at runtime

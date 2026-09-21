@@ -43,6 +43,22 @@ func TestSniff(t *testing.T) {
 	}
 }
 
+func TestSniffIsNotFooledByStoredArchiveContents(t *testing.T) {
+	// A ZIP that stores a PDF uncompressed has "%PDF-" a few bytes in. The
+	// archive signature is at byte 0 and must win.
+	archive := zipArchive(map[string][]byte{"invoice.pdf": minimalPDF("hi")})
+	if got := Sniff(archive); got != FormatZIP {
+		t.Fatalf("Sniff(zip of pdf) = %s, want zip", got)
+	}
+}
+
+func TestSniffAcceptsLeadingJunkBeforeThePDFHeader(t *testing.T) {
+	data := append([]byte("\n\n"), minimalPDF("hi")...)
+	if got := Sniff(data); got != FormatPDF {
+		t.Fatalf("Sniff = %s, want pdf", got)
+	}
+}
+
 func TestDetectPrefersContentOverExtension(t *testing.T) {
 	// A DOCX that someone named .pdf — the bytes decide.
 	if got := Detect("invoice.pdf", ooxmlZip("word/document.xml")); got != FormatDOCX {

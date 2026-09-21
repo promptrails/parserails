@@ -44,6 +44,7 @@ type Parser struct {
 	maxPages    int
 	imageOCR    bool
 	images      bool
+	containers  map[Format]Container
 }
 
 // Option configures a Parser.
@@ -59,6 +60,7 @@ type config struct {
 	maxPages                   int
 	imageOCR                   bool
 	images                     bool
+	containers                 map[Format]Container
 }
 
 // WithOCR sets the OCR backend used as a fallback for pages with no extractable
@@ -91,6 +93,18 @@ func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin
 // off by default; it needs an OCR backend (WithOCR) to do anything.
 func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
 
+// WithContainer registers a Container for a format, replacing the built-in
+// one. It is how you teach ParseRails to unpack something it does not know —
+// or stop it unpacking something it does.
+func WithContainer(format Format, c Container) Option {
+	return func(cfg *config) {
+		if cfg.containers == nil {
+			cfg.containers = map[Format]Container{}
+		}
+		cfg.containers[format] = c
+	}
+}
+
 // WithImages records the raster figures on each page (Page.Images), so
 // Markdown output can place them and callers can crop them. It costs one call
 // per page object, so it is off by default; WithImageOCR implies it.
@@ -116,7 +130,7 @@ func New(opts ...Option) (*Parser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parserails: init pdfium pool: %w", err)
 	}
-	return &Parser{
+	parser := &Parser{
 		pool:        pool,
 		ocr:         cfg.ocr,
 		granularity: cfg.granularity,
@@ -126,7 +140,12 @@ func New(opts ...Option) (*Parser, error) {
 		maxPages:    cfg.maxPages,
 		imageOCR:    cfg.imageOCR,
 		images:      cfg.images || cfg.imageOCR,
-	}, nil
+	}
+	parser.containers = defaultContainers(parser)
+	for format, c := range cfg.containers {
+		parser.containers[format] = c
+	}
+	return parser, nil
 }
 
 // Close releases the PDFium runtime and all pooled workers.
