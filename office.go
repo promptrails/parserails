@@ -9,20 +9,6 @@ import (
 	"strings"
 )
 
-// officeExts are the formats converted to PDF via LibreOffice before parsing.
-var officeExts = map[string]bool{
-	".docx": true, ".doc": true,
-	".pptx": true, ".ppt": true,
-	".xlsx": true, ".xls": true,
-	".odt": true, ".odp": true, ".ods": true, ".rtf": true,
-}
-
-// IsOfficeFormat reports whether path has an extension ParseRails converts to PDF
-// via LibreOffice before parsing.
-func IsOfficeFormat(path string) bool {
-	return officeExts[strings.ToLower(filepath.Ext(path))]
-}
-
 // locateSoffice finds the LibreOffice binary: an explicit path, then the
 // PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
 func locateSoffice(explicit string) (string, error) {
@@ -76,4 +62,21 @@ func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) 
 		return nil, fmt.Errorf("parserails: read converted pdf: %w", err)
 	}
 	return data, nil
+}
+
+// convertDataToPDF converts an office document held in memory. LibreOffice only
+// reads files, so the bytes are staged in a temp file named with the format's
+// extension — it dispatches on that, not on content.
+func (p *Parser) convertDataToPDF(ctx context.Context, data []byte, format Format) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "parserails-input-")
+	if err != nil {
+		return nil, fmt.Errorf("parserails: temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	path := filepath.Join(dir, "document"+format.Ext())
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return nil, fmt.Errorf("parserails: stage input: %w", err)
+	}
+	return p.convertToPDF(ctx, path)
 }

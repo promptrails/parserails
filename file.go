@@ -2,29 +2,8 @@ package parserails
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"sync"
 )
-
-// ParseFile reads and parses a document from disk. PDFs are parsed directly;
-// office documents (DOCX/PPTX/XLSX/...) are first converted to PDF via LibreOffice.
-func (p *Parser) ParseFile(ctx context.Context, path string) (*Document, error) {
-	if IsOfficeFormat(path) {
-		pdf, err := p.convertToPDF(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		return p.Parse(ctx, pdf)
-	}
-	// #nosec G304 -- `path` is this function's own API parameter: opening the
-	// file the caller names is the whole contract of a document parser.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("parserails: read file: %w", err)
-	}
-	return p.Parse(ctx, data)
-}
 
 // FileResult pairs a parsed document with its source path and any error.
 type FileResult struct {

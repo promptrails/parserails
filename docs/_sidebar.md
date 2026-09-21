@@ -5,6 +5,7 @@
 
 - **Core**
   - [Spatial Text Extraction](parsing.md)
+  - [Format Detection](formats.md)
   - [Page Screenshots](screenshots.md)
   - [OCR](ocr.md)
   - [Office Formats & Batches](office.md)

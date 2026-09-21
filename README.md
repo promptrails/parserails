@@ -31,6 +31,7 @@ actually need.
 | Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
 | HTTP OCR adapter (remote OCR servers) | `net/http` | ✅ |
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
+| Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |

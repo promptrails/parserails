@@ -97,8 +97,12 @@ func New(opts ...Option) (*Parser, error) {
 // Close releases the PDFium runtime and all pooled workers.
 func (p *Parser) Close() error { return p.pool.Close() }
 
-// Parse extracts every page's words with bounding boxes from the given PDF data.
+// Parse extracts every page's words with bounding boxes from the given PDF
+// data. Use ParseData for input that may be in another format.
 func (p *Parser) Parse(ctx context.Context, data []byte) (*Document, error) {
+	if f := Sniff(data); f != FormatPDF && f != FormatUnknown {
+		return nil, fmt.Errorf("parserails: Parse wants PDF data, got %s; use ParseData", f)
+	}
 	inst, err := p.pool.GetInstance(30 * time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
