@@ -32,6 +32,7 @@ actually need.
 | HTTP OCR adapter (remote OCR servers) | `net/http` | ✅ |
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
 | Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
+| Encrypted PDFs, page ranges (`ReadOptions`) | PDFium | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |

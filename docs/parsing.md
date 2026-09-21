@@ -119,3 +119,42 @@ Reading order is top-to-bottom, then left-to-right, across the **whole page
 width**. A two-column page therefore reads line by line across both columns —
 use [Markdown output](markdown.md) when column structure matters, or
 `ExtractText` when you want PDFium's own text order without any reconstruction.
+
+## Read options: passwords and page ranges
+
+Every in-memory entry point takes a `ReadOptions`, so one `Parser` can serve
+documents with different passwords and page selections concurrently.
+
+```go
+doc, err := p.ParseData(ctx, data, parserails.ReadOptions{
+	Name:     "statement.pdf", // format hint, only used when the bytes are ambiguous
+	Password: "hunter2",       // encrypted documents
+	Pages:    "1-5,10",        // 1-based, inclusive, in the order written
+	MaxPages: 20,              // cap applied after Pages
+})
+```
+
+| Field | Meaning |
+|-------|---------|
+| `Name` | file name hint for [format detection](formats.md) |
+| `Password` | opens an encrypted document; defaults to `WithPassword` |
+| `Pages` | 1-based selection like `"1-5,10,15-20"`; empty means all pages |
+| `MaxPages` | caps pages read after `Pages`; defaults to `WithMaxPages`, negative means no cap |
+
+Pages past the end of the document are skipped rather than rejected, so
+`"1-10"` on a 3-page file returns those 3 pages. Selected pages keep their
+**absolute** `Page.Index`, so `doc.Pages[0].Index == 1` after asking for page 2.
+
+Parser-wide defaults:
+
+```go
+p, _ := parserails.New(
+	parserails.WithPassword("hunter2"),
+	parserails.WithMaxPages(50),
+)
+```
+
+An encrypted document opened without a password fails with an error that says
+so (`document is encrypted`), and a wrong password says `wrong password` —
+rather than surfacing PDFium's numeric code. `RenderPage` takes the password
+too, via `RenderRequest.Password`.

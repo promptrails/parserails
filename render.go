@@ -16,8 +16,9 @@ const defaultOCRDPI = 200
 
 // RenderRequest describes how to rasterize a single page.
 type RenderRequest struct {
-	Page int // 0-based page index.
-	DPI  int // Render resolution; defaults to 150 when zero.
+	Page     int    // 0-based page index.
+	DPI      int    // Render resolution; defaults to 150 when zero.
+	Password string // Password for encrypted documents; defaults to WithPassword.
 }
 
 // RenderPage rasterizes a single page of the given PDF to an image. It uses the
@@ -33,9 +34,13 @@ func (p *Parser) RenderPage(ctx context.Context, data []byte, req RenderRequest)
 	}
 	defer func() { _ = inst.Close() }()
 
-	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
+	password := req.Password
+	if password == "" {
+		password = p.password
+	}
+	doc, err := openDocument(inst, data, password)
 	if err != nil {
-		return nil, fmt.Errorf("parserails: open document: %w", err)
+		return nil, err
 	}
 	defer func() {
 		_, _ = inst.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})

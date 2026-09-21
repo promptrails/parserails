@@ -13,6 +13,33 @@ type ReadOptions struct {
 	// Name is a file name hint. It is only consulted where the bytes are
 	// ambiguous — legacy OLE documents, or content no magic number identifies.
 	Name string
+
+	// Password opens an encrypted document. Empty means the parser's default
+	// (see WithPassword).
+	Password string
+
+	// Pages selects which pages to read, 1-based and inclusive, in the form
+	// "1-5,10,15-20". Empty means every page. Pages beyond the end of the
+	// document are skipped.
+	Pages string
+
+	// MaxPages caps how many pages are read after Pages is applied. Zero means
+	// the parser's default (see WithMaxPages); a negative value means no cap.
+	MaxPages int
+}
+
+// withDefaults fills unset fields from the parser's configuration.
+func (p *Parser) withDefaults(opt ReadOptions) ReadOptions {
+	if opt.Password == "" {
+		opt.Password = p.password
+	}
+	if opt.MaxPages == 0 {
+		opt.MaxPages = p.maxPages
+	}
+	if opt.MaxPages < 0 {
+		opt.MaxPages = 0
+	}
+	return opt
 }
 
 // ParseData parses a document held in memory, detecting its format from the
@@ -25,13 +52,13 @@ func (p *Parser) ParseData(ctx context.Context, data []byte, opt ReadOptions) (*
 	format := Detect(opt.Name, data)
 	switch {
 	case format == FormatPDF:
-		return p.Parse(ctx, data)
+		return p.parsePDF(ctx, data, opt)
 	case format.IsOffice():
 		pdf, err := p.convertDataToPDF(ctx, data, format)
 		if err != nil {
 			return nil, err
 		}
-		return p.Parse(ctx, pdf)
+		return p.parsePDF(ctx, pdf, opt)
 	default:
 		return nil, unparsableError(opt.Name, format)
 	}
@@ -45,16 +72,17 @@ func (p *Parser) ParseFile(ctx context.Context, path string) (*Document, error) 
 	if err != nil {
 		return nil, err
 	}
+	opt := ReadOptions{Name: path}
 	switch {
 	case format == FormatPDF:
-		return p.Parse(ctx, data)
+		return p.parsePDF(ctx, data, opt)
 	case format.IsOffice():
 		// Convert from the path we already have rather than a temp copy.
 		pdf, err := p.convertToPDF(ctx, path)
 		if err != nil {
 			return nil, err
 		}
-		return p.Parse(ctx, pdf)
+		return p.parsePDF(ctx, pdf, opt)
 	default:
 		return nil, unparsableError(path, format)
 	}
