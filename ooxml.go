@@ -48,14 +48,23 @@ func (o *OfficeDocument) Text() string {
 // Markdown renders the document as Markdown.
 func (o *OfficeDocument) Markdown() string { return renderMarkdown(o.Blocks) }
 
+// joinCells renders a row as tab-separated text, keeping empty cells so the
+// columns still line up — dropping them would shift every value left of a gap
+// under the wrong header.
 func joinCells(row []Cell) string {
 	parts := make([]string, 0, len(row))
-	for _, c := range row {
-		if text := strings.TrimSpace(c.Text); text != "" {
-			parts = append(parts, text)
+	last := -1
+	for i, c := range row {
+		text := strings.TrimSpace(c.Text)
+		parts = append(parts, text)
+		if text != "" {
+			last = i
 		}
 	}
-	return strings.Join(parts, "\t")
+	if last < 0 {
+		return ""
+	}
+	return strings.Join(parts[:last+1], "\t")
 }
 
 // ReadOfficeDocument reads an OOXML package (DOCX, XLSX, PPTX) directly.
@@ -401,15 +410,22 @@ func sharedStrings(zr *zip.Reader) []string {
 
 // sheetRows reads a worksheet's cells, honouring the column each one declares
 // so sparse rows still line up.
+//
+// Two details of the format decide the shape of this loop: a cell may carry
+// several rich-text runs, each in its own <t>, which belong to one value; and
+// the r="B3" reference is optional — streaming writers omit it and mean "the
+// next column".
 func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 	var (
-		rows    [][]Cell
-		row     map[int]string
-		width   int
-		colOf   int
-		cellTyp string
-		value   strings.Builder
-		inValue bool
+		rows     [][]Cell
+		row      map[int]string
+		width    int
+		column   int
+		nextCol  int
+		cellTyp  string
+		cellText strings.Builder
+		value    strings.Builder
+		inValue  bool
 	)
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
@@ -425,9 +441,15 @@ func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 			switch t.Name.Local {
 			case "row":
 				row = map[int]string{}
+				nextCol = 0
 			case "c":
-				colOf = columnIndex(attr(t, "r"))
 				cellTyp = attr(t, "t")
+				cellText.Reset()
+				column = columnIndex(attr(t, "r"))
+				if column < 0 {
+					column = nextCol // absent or unusable reference
+				}
+				nextCol = column + 1
 			case "v", "t":
 				inValue = true
 				value.Reset()
@@ -440,23 +462,23 @@ func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 			switch t.Name.Local {
 			case "v", "t":
 				inValue = false
-				if row == nil {
-					continue
-				}
 				text := value.String()
 				if cellTyp == "s" {
 					if i, err := strconv.Atoi(text); err == nil && i >= 0 && i < len(strs) {
 						text = strs[i]
 					}
 				}
-				if text != "" {
-					row[colOf] = text
-					width = max(width, colOf+1)
+				cellText.WriteString(text)
+			case "c":
+				if row == nil || cellText.Len() == 0 {
+					continue
 				}
+				row[column] = cellText.String()
+				width = max(width, column+1)
+				cellText.Reset()
 			case "row":
 				if len(row) > 0 {
-					rows = append(rows, nil) // filled once the width is known
-					rows[len(rows)-1] = spreadRow(row, width)
+					rows = append(rows, spreadRow(row, width))
 				}
 				row = nil
 			}
@@ -468,7 +490,7 @@ func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 func spreadRow(row map[int]string, width int) []Cell {
 	cells := make([]Cell, width)
 	for col, text := range row {
-		if col < width {
+		if col >= 0 && col < width {
 			cells[col] = Cell{Text: text}
 		}
 	}
@@ -485,17 +507,27 @@ func padRows(rows [][]Cell, width int) [][]Cell {
 	return rows
 }
 
-// columnIndex turns a cell reference like "BC12" into a 0-based column.
+// maxSpreadsheetColumn is Excel's last column, XFD. A reference past it is not
+// a reference: read as a number, a long run of letters overflows int and then
+// indexes a slice with a negative column.
+const maxSpreadsheetColumn = 16384
+
+// columnIndex turns a cell reference like "BC12" into a 0-based column, or -1
+// when the reference is absent or not one.
 func columnIndex(ref string) int {
-	col := 0
+	col, letters := 0, 0
 	for _, r := range ref {
 		if r < 'A' || r > 'Z' {
 			break
 		}
+		letters++
+		if letters > 3 {
+			return -1
+		}
 		col = col*26 + int(r-'A') + 1
 	}
-	if col == 0 {
-		return 0
+	if col == 0 || col > maxSpreadsheetColumn {
+		return -1
 	}
 	return col - 1
 }

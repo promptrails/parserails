@@ -112,6 +112,47 @@ func TestReadOfficeDocumentPPTX(t *testing.T) {
 	}
 }
 
+func TestSheetRowsHandlesRichTextAndMissingRefs(t *testing.T) {
+	// An inline cell built from two runs, then three cells with no r=.
+	rows, err := sheetRows([]byte(`<worksheet><sheetData>`+
+		`<row r="1"><c r="A1" t="inlineStr"><is><r><t>Hello </t></r><r><t>world</t></r></is></c></row>`+
+		`<row r="2"><c><v>1</v></c><c><v>2</v></c><c><v>3</v></c></row>`+
+		`</sheetData></worksheet>`), nil)
+	if err != nil {
+		t.Fatalf("sheetRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if got := rows[0][0].Text; got != "Hello world" {
+		t.Errorf("rich-text cell = %q, want the runs joined", got)
+	}
+	if len(rows[1]) != 3 || rows[1][0].Text != "1" || rows[1][2].Text != "3" {
+		t.Errorf("cells without r = %+v, want three columns", rows[1])
+	}
+}
+
+func TestSheetRowsSurvivesImpossibleReference(t *testing.T) {
+	rows, err := sheetRows([]byte(`<worksheet><sheetData><row r="1">`+
+		`<c r="ZZZZZZZZZZZZZZ1"><v>9</v></c></row></sheetData></worksheet>`), nil)
+	if err != nil {
+		t.Fatalf("sheetRows: %v", err)
+	}
+	if len(rows) != 1 || rows[0][0].Text != "9" {
+		t.Fatalf("rows = %+v, want the value in the first column", rows)
+	}
+}
+
+func TestOfficeTextKeepsColumnPositions(t *testing.T) {
+	office := &OfficeDocument{Blocks: []Block{{
+		Kind: BlockTable,
+		Rows: [][]Cell{{{Text: "A"}, {}, {Text: "C"}, {}}},
+	}}}
+	if got := office.Text(); got != "A\t\tC" {
+		t.Fatalf("text = %q, want A\\t\\tC (interior gap kept, trailing dropped)", got)
+	}
+}
+
 func TestNativeOfficeTextNeedsNoLibreOffice(t *testing.T) {
 	docx := zipArchive(map[string][]byte{
 		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body>` +
@@ -138,7 +179,13 @@ func TestNativeOfficeTextNeedsNoLibreOffice(t *testing.T) {
 }
 
 func TestColumnIndex(t *testing.T) {
-	cases := map[string]int{"A1": 0, "B2": 1, "Z9": 25, "AA1": 26, "BC12": 54, "": 0}
+	cases := map[string]int{
+		"A1": 0, "B2": 1, "Z9": 25, "AA1": 26, "BC12": 54,
+		"XFD1": maxSpreadsheetColumn - 1,
+		// Absent or impossible references are rejected, not wrapped around:
+		// a long run of letters used to overflow into a negative index.
+		"": -1, "ZZZZZZZZZZZZZZ1": -1, "ZZZZ1": -1,
+	}
 	for ref, want := range cases {
 		if got := columnIndex(ref); got != want {
 			t.Errorf("columnIndex(%q) = %d, want %d", ref, got, want)
