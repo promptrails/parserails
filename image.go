@@ -22,6 +22,12 @@ import (
 // in **pixels**, with the origin flipped to the bottom-left so image words obey
 // the same convention as PDF words.
 func (p *Parser) ParseImage(ctx context.Context, data []byte) (*Document, error) {
+	return bounded(ctx, p, func(ctx context.Context) (*Document, error) {
+		return p.parseImage(ctx, data)
+	})
+}
+
+func (p *Parser) parseImage(ctx context.Context, data []byte) (*Document, error) {
 	if !p.hasOCR() {
 		return nil, fmt.Errorf("parserails: reading an image needs an OCR backend (see WithOCR)")
 	}

@@ -45,6 +45,7 @@ type Parser struct {
 	imageOCR     bool
 	images       bool
 	nativeOffice bool
+	timeout      time.Duration
 	containers   map[Format]Container
 }
 
@@ -62,6 +63,7 @@ type config struct {
 	imageOCR                   bool
 	images                     bool
 	nativeOffice               bool
+	timeout                    time.Duration
 	containers                 map[Format]Container
 }
 
@@ -94,6 +96,15 @@ func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin
 // It costs one page render plus one OCR call per substantial figure, so it is
 // off by default; it needs an OCR backend (WithOCR) to do anything.
 func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
+
+// WithTimeout caps how long any single document may take. Zero, the default,
+// means no cap.
+//
+// PDFium cannot be interrupted, so a document that exceeds the timeout is
+// abandoned rather than killed: the call returns, and the worker finishes in
+// the background and releases itself. That is what keeps one pathological
+// file in a batch of ten thousand from stalling the pipeline.
+func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 // WithNativeOffice reads Office Open XML packages (DOCX, XLSX, PPTX) directly
 // instead of converting them with LibreOffice, wherever text rather than page
@@ -154,6 +165,7 @@ func New(opts ...Option) (*Parser, error) {
 		images:      cfg.images || cfg.imageOCR,
 
 		nativeOffice: cfg.nativeOffice,
+		timeout:      cfg.timeout,
 	}
 	parser.containers = defaultContainers(parser)
 	for format, c := range cfg.containers {
@@ -178,9 +190,15 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (*Document, error) {
 // parsePDF is the PDF parsing core: every entry point funnels here once the
 // input is known to be a PDF.
 func (p *Parser) parsePDF(ctx context.Context, data []byte, opt ReadOptions) (*Document, error) {
+	return bounded(ctx, p, func(ctx context.Context) (*Document, error) {
+		return p.parsePDFUnbounded(ctx, data, opt)
+	})
+}
+
+func (p *Parser) parsePDFUnbounded(ctx context.Context, data []byte, opt ReadOptions) (*Document, error) {
 	opt = p.withDefaults(opt)
 
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}

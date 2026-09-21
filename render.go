@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"time"
 
 	pdfium "github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
@@ -25,10 +24,16 @@ type RenderRequest struct {
 // same PDFium runtime as text extraction, so there is no extra dependency and no
 // cgo. Useful for thumbnails, LLM-vision input, or feeding an OCR backend.
 func (p *Parser) RenderPage(ctx context.Context, data []byte, req RenderRequest) (image.Image, error) {
+	return bounded(ctx, p, func(ctx context.Context) (image.Image, error) {
+		return p.renderPage(ctx, data, req)
+	})
+}
+
+func (p *Parser) renderPage(ctx context.Context, data []byte, req RenderRequest) (image.Image, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}

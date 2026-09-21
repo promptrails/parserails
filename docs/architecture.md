@@ -84,3 +84,29 @@ trustworthy bounding boxes. PDFium already does this correctly and is battle-
 tested in Chrome. ParseRails borrows that correctness and pays for it only in
 WASM overhead — not in cgo pain. See the [Benchmarks](benchmarks.md) for how this
 compares to pure-Go readers.
+
+## Timeouts: one bad document must not stall the batch
+
+PDFium cannot be interrupted. Neither the WebAssembly runtime nor the native
+library polls a cancellation signal, so a `context` deadline alone does
+nothing once a call is inside the engine: a pathological document can occupy a
+worker indefinitely, and in a pool of four, four of them stop the process.
+
+`WithTimeout` bounds each document instead:
+
+```go
+p, _ := parserails.New(parserails.WithTimeout(30 * time.Second))
+```
+
+Each operation runs on its own goroutine and the caller stops waiting when the
+deadline passes, returning `document timed out after 30s`. The abandoned
+worker is not killed — it cannot be — but it does finish, close its instance
+and return it to the pool. It is a worker that is busy for too long, not a
+leak, and the pipeline keeps moving while one bad document finishes dying.
+
+Without a timeout nothing is wrapped: the operation runs inline, with no extra
+goroutine, exactly as before. A caller whose own `context` deadline is tighter
+than the parser's governs instead, and cancellation propagates unchanged.
+
+The same value also caps how long a call waits for a free worker, so a tight
+deadline is not spent queueing behind other documents.

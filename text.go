@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/klippa-app/go-pdfium/requests"
 )
@@ -46,9 +45,15 @@ func (p *Parser) ExtractTextData(ctx context.Context, data []byte, opt ReadOptio
 }
 
 func (p *Parser) extractPDFText(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
+	return bounded(ctx, p, func(ctx context.Context) (string, error) {
+		return p.extractPDFTextUnbounded(ctx, data, opt)
+	})
+}
+
+func (p *Parser) extractPDFTextUnbounded(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
 	opt = p.withDefaults(opt)
 
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return "", fmt.Errorf("parserails: acquire instance: %w", err)
 	}

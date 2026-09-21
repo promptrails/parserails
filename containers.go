@@ -10,7 +10,6 @@ import (
 	"mime"
 	"net/mail"
 	"strings"
-	"time"
 
 	"github.com/klippa-app/go-pdfium/requests"
 )
@@ -75,7 +74,7 @@ func readZipFile(f *zip.File) ([]byte, error) {
 type pdfContainer struct{ parser *Parser }
 
 func (c pdfContainer) Children(_ context.Context, data []byte) ([]Child, error) {
-	inst, err := c.parser.pool.GetInstance(30 * time.Second)
+	inst, err := c.parser.pool.GetInstance(c.parser.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}

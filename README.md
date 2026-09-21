@@ -39,6 +39,7 @@ actually need.
 | Complexity routing (`Inspect`, `is-complex`) | PDFium | ✅ |
 | Recursive containers (ZIP/EML/MSG/OLE/attachments) | — | ✅ |
 | Concurrent batch parsing | — | ✅ |
+| Per-document timeouts (`WithTimeout`) | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |
 | Markdown output (headings, tables, lists, figures) | — | ✅ |

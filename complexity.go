@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 	"unicode"
 
 	pdfium "github.com/klippa-app/go-pdfium"
@@ -143,9 +142,15 @@ func imageComplexity() *Complexity {
 }
 
 func (p *Parser) inspectPDF(ctx context.Context, data []byte, opt ReadOptions) (*Complexity, error) {
+	return bounded(ctx, p, func(ctx context.Context) (*Complexity, error) {
+		return p.inspectPDFUnbounded(ctx, data, opt)
+	})
+}
+
+func (p *Parser) inspectPDFUnbounded(ctx context.Context, data []byte, opt ReadOptions) (*Complexity, error) {
 	opt = p.withDefaults(opt)
 
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}
