@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParsePageSpec(t *testing.T) {
@@ -35,6 +36,27 @@ func TestParsePageSpec(t *testing.T) {
 			t.Errorf("parsePageSpec(%q) = %v, want %v", tc.spec, got, tc.want)
 		}
 	}
+	// A range far past the document is clipped, not walked: these return
+	// immediately rather than iterating billions of times.
+	for _, spec := range []string{"1-1000000000", "1-9223372036854775807", "2-9223372036854775807"} {
+		done := make(chan []int, 1)
+		go func() {
+			got, err := parsePageSpec(spec, 3)
+			if err != nil {
+				t.Errorf("parsePageSpec(%q): %v", spec, err)
+			}
+			done <- got
+		}()
+		select {
+		case got := <-done:
+			if len(got) > 3 {
+				t.Errorf("parsePageSpec(%q) returned %d pages for a 3-page document", spec, len(got))
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("parsePageSpec(%q) did not terminate", spec)
+		}
+	}
+
 	for _, bad := range []string{"0", "abc", "3-1", "-2"} {
 		if _, err := parsePageSpec(bad, 5); err == nil {
 			t.Errorf("parsePageSpec(%q) should fail", bad)

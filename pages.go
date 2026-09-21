@@ -41,6 +41,13 @@ func parsePageSpec(spec string, count int) ([]int, error) {
 		if start < 1 || end < start {
 			return nil, fmt.Errorf("parserails: bad page range %q (pages are 1-based)", part)
 		}
+		// Clamp to the document before walking the range. "1-1000000000" is a
+		// billion iterations that add nothing, and an endpoint at MaxInt makes
+		// the counter wrap and the loop never end.
+		if start > count {
+			continue
+		}
+		end = min(end, count)
 		for i := start; i <= end; i++ {
 			add(i - 1)
 		}
