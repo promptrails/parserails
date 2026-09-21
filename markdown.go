@@ -17,11 +17,18 @@ func (d *Document) Markdown() string { return d.MarkdownWith(BlockOptions{}) }
 // [Blocks] decomposition it is built from is available as data when you need
 // to handle those cases yourself.
 func (d *Document) MarkdownWith(opt BlockOptions) string {
+	return renderMarkdown(d.BlocksWith(opt))
+}
+
+// renderMarkdown writes a block sequence as Markdown. It is shared by the
+// spatial reconstruction and by documents read natively out of an office
+// package, which produce the same blocks by other means.
+func renderMarkdown(blocks []Block) string {
 	var (
 		b    strings.Builder
 		last BlockKind
 	)
-	for _, block := range d.BlocksWith(opt) {
+	for _, block := range blocks {
 		text := strings.TrimSpace(block.Text)
 		if text == "" && block.Kind != BlockTable && block.Kind != BlockFigure {
 			continue

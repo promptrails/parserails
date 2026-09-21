@@ -2,12 +2,18 @@ package parserails
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+// ErrNoLibreOffice reports that no LibreOffice binary could be found. Office
+// conversion wraps it, so callers can fall back to reading a package natively
+// instead of treating a missing dependency like a broken document.
+var ErrNoLibreOffice = errors.New("parserails: LibreOffice not found")
 
 // locateSoffice finds the LibreOffice binary: an explicit path, then the
 // PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
@@ -21,7 +27,7 @@ func locateSoffice(explicit string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("parserails: LibreOffice not found (install it or set PARSERAILS_SOFFICE)")
+	return "", fmt.Errorf("%w (install it or set PARSERAILS_SOFFICE)", ErrNoLibreOffice)
 }
 
 // convertToPDF renders an office document to PDF bytes using headless
@@ -79,4 +85,28 @@ func (p *Parser) convertDataToPDF(ctx context.Context, data []byte, format Forma
 		return nil, fmt.Errorf("parserails: stage input: %w", err)
 	}
 	return p.convertToPDF(ctx, path)
+}
+
+// officeText reads an office document's text, natively for an OOXML package
+// when that was asked for — or when LibreOffice is missing and the package can
+// be read without it.
+func (p *Parser) officeText(ctx context.Context, data []byte, format Format, opt ReadOptions) (string, error) {
+	if p.nativeOffice && format.IsOOXML() {
+		doc, err := ReadOfficeDocument(data, format)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
+	}
+
+	pdf, err := p.convertDataToPDF(ctx, data, format)
+	if err != nil {
+		if errors.Is(err, ErrNoLibreOffice) && format.IsOOXML() {
+			if doc, nativeErr := ReadOfficeDocument(data, format); nativeErr == nil {
+				return doc.Text(), nil
+			}
+		}
+		return "", err
+	}
+	return p.extractPDFText(ctx, pdf, opt)
 }

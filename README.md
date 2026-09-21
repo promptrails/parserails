@@ -33,6 +33,7 @@ actually need.
 | Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
 | HTTP OCR adapter (LiteParse OCR API compatible) | `net/http` | ✅ |
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
+| Native DOCX/XLSX/PPTX reading (no LibreOffice) | `archive/zip` + `encoding/xml` | ✅ |
 | Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
 | Encrypted PDFs, page ranges (`ReadOptions`) | PDFium | ✅ |
 | Complexity routing (`Inspect`, `is-complex`) | PDFium | ✅ |

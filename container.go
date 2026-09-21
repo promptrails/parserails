@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -234,16 +235,31 @@ func (w *walker) read(ctx context.Context, node *Node, data []byte) {
 			return
 		}
 		node.Text = text
+	case node.Format.IsOOXML() && w.parser.nativeOffice:
+		office, err := ReadOfficeDocument(data, node.Format)
+		if err != nil {
+			node.Err = err
+			return
+		}
+		node.Text = office.Text()
 	case node.Format == FormatPDF, node.Format.IsOffice(),
 		node.Format.IsImage() && w.parser.hasOCR():
 		opt := w.opt.ReadOptions
 		opt.Name = node.Name
 		doc, err := w.parser.ParseData(ctx, data, opt)
-		if err != nil {
-			node.Err = err
+		if err == nil {
+			node.Document = doc
 			return
 		}
-		node.Document = doc
+		// A missing LibreOffice is a missing dependency, not a broken
+		// document: an OOXML package can still be read without it.
+		if errors.Is(err, ErrNoLibreOffice) && node.Format.IsOOXML() {
+			if office, nativeErr := ReadOfficeDocument(data, node.Format); nativeErr == nil {
+				node.Text = office.Text()
+				return
+			}
+		}
+		node.Err = err
 	}
 }
 

@@ -35,16 +35,17 @@ const (
 // It is safe for concurrent use: each Parse call borrows an instance from the
 // pool and returns it when done. Create one Parser per process and reuse it.
 type Parser struct {
-	pool        pdfium.Pool
-	ocr         OCR
-	granularity Granularity
-	fontInfo    bool
-	sofficeBin  string
-	password    string
-	maxPages    int
-	imageOCR    bool
-	images      bool
-	containers  map[Format]Container
+	pool         pdfium.Pool
+	ocr          OCR
+	granularity  Granularity
+	fontInfo     bool
+	sofficeBin   string
+	password     string
+	maxPages     int
+	imageOCR     bool
+	images       bool
+	nativeOffice bool
+	containers   map[Format]Container
 }
 
 // Option configures a Parser.
@@ -60,6 +61,7 @@ type config struct {
 	maxPages                   int
 	imageOCR                   bool
 	images                     bool
+	nativeOffice               bool
 	containers                 map[Format]Container
 }
 
@@ -92,6 +94,16 @@ func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin
 // It costs one page render plus one OCR call per substantial figure, so it is
 // off by default; it needs an OCR backend (WithOCR) to do anything.
 func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
+
+// WithNativeOffice reads Office Open XML packages (DOCX, XLSX, PPTX) directly
+// instead of converting them with LibreOffice, wherever text rather than page
+// geometry is wanted: ExtractTextData, ExtractFileText and the Extract walk.
+//
+// It removes the LibreOffice dependency for those paths and keeps the
+// document's own structure — real table cells, declared heading levels — at
+// the cost of page coordinates, which a package does not have. Text
+// extraction falls back to it by itself when LibreOffice is missing.
+func WithNativeOffice() Option { return func(c *config) { c.nativeOffice = true } }
 
 // WithContainer registers a Container for a format, replacing the built-in
 // one. It is how you teach ParseRails to unpack something it does not know —
@@ -140,6 +152,8 @@ func New(opts ...Option) (*Parser, error) {
 		maxPages:    cfg.maxPages,
 		imageOCR:    cfg.imageOCR,
 		images:      cfg.images || cfg.imageOCR,
+
+		nativeOffice: cfg.nativeOffice,
 	}
 	parser.containers = defaultContainers(parser)
 	for format, c := range cfg.containers {

@@ -33,11 +33,7 @@ func (p *Parser) ExtractTextData(ctx context.Context, data []byte, opt ReadOptio
 	case format == FormatPDF:
 		return p.extractPDFText(ctx, data, opt)
 	case format.IsOffice():
-		pdf, err := p.convertDataToPDF(ctx, data, format)
-		if err != nil {
-			return "", err
-		}
-		return p.extractPDFText(ctx, pdf, opt)
+		return p.officeText(ctx, data, format, opt)
 	case format.IsImage():
 		doc, err := p.ParseImage(ctx, data)
 		if err != nil {
@@ -105,11 +101,7 @@ func (p *Parser) ExtractFileText(ctx context.Context, path string) (string, erro
 	case format == FormatPDF:
 		return p.extractPDFText(ctx, data, ReadOptions{Name: path})
 	case format.IsOffice():
-		pdf, err := p.convertToPDF(ctx, path)
-		if err != nil {
-			return "", err
-		}
-		return p.extractPDFText(ctx, pdf, ReadOptions{Name: path})
+		return p.officeText(ctx, data, format, ReadOptions{Name: path})
 	case format.IsImage():
 		doc, err := p.ParseImage(ctx, data)
 		if err != nil {
