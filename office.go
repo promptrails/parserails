@@ -31,9 +31,19 @@ func locateSoffice(explicit string) (string, error) {
 }
 
 // convertToPDF renders an office document to PDF bytes using headless
-// LibreOffice. A throwaway user profile is used per call so conversions can run
-// concurrently without colliding on LibreOffice's default profile lock.
+// LibreOffice, under the parser's timeout. Unlike PDFium, LibreOffice is a
+// subprocess and really is killable, so a stuck conversion dies rather than
+// being abandoned.
 func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) {
+	return bounded(ctx, p, func(ctx context.Context) ([]byte, error) {
+		return p.convertFile(ctx, path)
+	})
+}
+
+// convertFile is the conversion itself. A throwaway user profile is used per
+// call so conversions can run concurrently without colliding on LibreOffice's
+// default profile lock.
+func (p *Parser) convertFile(ctx context.Context, path string) ([]byte, error) {
 	bin, err := locateSoffice(p.sofficeBin)
 	if err != nil {
 		return nil, err

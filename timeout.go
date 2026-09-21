@@ -10,7 +10,8 @@ import (
 // before giving up.
 const defaultAcquireTimeout = 30 * time.Second
 
-// bounded runs one document operation under the parser's timeout.
+// bounded runs one document operation under the earlier of the parser's
+// timeout and the caller's own deadline.
 //
 // PDFium calls cannot be interrupted: neither the WebAssembly runtime nor the
 // native library polls a cancellation signal, so a pathological document can
@@ -24,15 +25,17 @@ func bounded[T any](ctx context.Context, p *Parser, op func(context.Context) (T,
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	timeout := p.timeout
-	if timeout <= 0 {
-		return op(ctx) // no deadline configured: run inline, no goroutine
-	}
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= timeout {
-		return op(ctx) // the caller's own deadline is tighter; let it govern
+
+	callerDeadline, hasDeadline := ctx.Deadline()
+	if p.timeout <= 0 && !hasDeadline {
+		return op(ctx) // nothing to enforce: run inline, no goroutine
 	}
 
-	inner, cancel := context.WithTimeout(ctx, timeout)
+	inner, cancel := ctx, context.CancelFunc(func() {})
+	if p.timeout > 0 && (!hasDeadline || time.Until(callerDeadline) > p.timeout) {
+		inner, cancel = context.WithTimeout(ctx, p.timeout)
+	}
+
 	type result struct {
 		value T
 		err   error
@@ -50,10 +53,13 @@ func bounded[T any](ctx context.Context, p *Parser, op func(context.Context) (T,
 	case r := <-done:
 		return r.value, r.err
 	case <-inner.Done():
-		if ctx.Err() != nil {
-			return zero, ctx.Err() // the caller cancelled
+		// A caller's own deadline is enforced here too. Letting it "govern"
+		// by running inline would mean nothing enforced it at all: the engine
+		// never looks at the context once a call is under way.
+		if err := ctx.Err(); err != nil {
+			return zero, err
 		}
-		return zero, fmt.Errorf("parserails: document timed out after %s", timeout)
+		return zero, fmt.Errorf("parserails: document timed out after %s", p.timeout)
 	}
 }
 

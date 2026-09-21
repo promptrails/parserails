@@ -104,9 +104,16 @@ worker is not killed — it cannot be — but it does finish, close its instance
 and return it to the pool. It is a worker that is busy for too long, not a
 leak, and the pipeline keeps moving while one bad document finishes dying.
 
-Without a timeout nothing is wrapped: the operation runs inline, with no extra
-goroutine, exactly as before. A caller whose own `context` deadline is tighter
-than the parser's governs instead, and cancellation propagates unchanged.
+A caller's own `context` deadline is enforced the same way, whichever is
+earlier, and with no timeout configured at all the operation runs inline with
+no extra goroutine. Letting a tighter caller deadline "govern" by itself would
+mean nothing enforced it: the engine never looks at the context once a call is
+under way.
+
+What is covered: PDF parsing, text extraction, complexity inspection,
+rendering, image OCR, LibreOffice conversion, and container enumeration.
+LibreOffice is the one that can really be killed — it is a subprocess, so a
+stuck conversion dies rather than being abandoned.
 
 The same value also caps how long a call waits for a free worker, so a tight
 deadline is not spent queueing behind other documents.
