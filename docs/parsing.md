@@ -9,11 +9,12 @@ LLM-vision pipeline.
 
 ```go
 type Word struct {
-	Text     string  // the word's text
-	Page     int     // 0-based page index
-	X0, Y0   float64 // lower-left corner
-	X1, Y1   float64 // upper-right corner
-	FontSize float64 // font size in points
+	Text       string  // the word's text
+	Page       int     // 0-based page index
+	X0, Y0     float64 // lower-left corner
+	X1, Y1     float64 // upper-right corner
+	FontSize   float64 // font size in points
+	Confidence float64 // OCR score, 0-1; 0 for native text
 }
 ```
 
@@ -49,6 +50,19 @@ end the current word.
 
 This keeps extraction faithful to what is actually drawn on the page — no
 heuristic reflow, no guessing.
+
+`Confidence` separates recognized text from extracted text. Text read out of
+the PDF's own text layer is not a guess and carries no score, so it stays `0`;
+anything an OCR backend produced reports what that backend thought of it.
+`word.IsOCR()` is the same test spelled out:
+
+```go
+for _, w := range doc.Words() {
+	if w.IsOCR() && w.Confidence < 0.6 {
+		lowConfidence = append(lowConfidence, w) // flag for review
+	}
+}
+```
 
 > `FontSize` is `0` unless you opt in with `parserails.New(parserails.WithFontInfo())`.
 > Collecting per-character font metrics roughly doubles extraction cost, so it is

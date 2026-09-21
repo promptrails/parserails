@@ -17,7 +17,15 @@ type Word struct {
 	// FontSize is the font size in points. It is 0 unless the parser was created
 	// with WithFontInfo (and GranularityWord).
 	FontSize float64 `json:"font_size,omitempty"`
+	// Confidence is how sure the recognizer is of this word, from 0 to 1. It is
+	// 0 for text extracted natively from the PDF, which is not a guess and
+	// carries no score; OCR backends that report one set it.
+	Confidence float64 `json:"confidence,omitempty"`
 }
+
+// IsOCR reports whether the word came from an OCR backend rather than from the
+// document's own text layer.
+func (w Word) IsOCR() bool { return w.Confidence > 0 }
 
 // Page holds the words extracted from a single page plus its dimensions.
 type Page struct {

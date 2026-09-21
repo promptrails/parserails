@@ -106,7 +106,8 @@ func (b *backend) parseTSV(data []byte) ([]parserails.Word, error) {
 		if text == "" {
 			continue
 		}
-		if conf := atof(f[colConf]); conf < b.cfg.MinConfidence {
+		conf := atof(f[colConf])
+		if conf < b.cfg.MinConfidence {
 			continue
 		}
 		left, top := atof(f[colLeft]), atof(f[colTop])
@@ -115,6 +116,8 @@ func (b *backend) parseTSV(data []byte) ([]parserails.Word, error) {
 			Text: text,
 			X0:   left, Y0: top, // pixel space, top-left origin
 			X1: left + width, Y1: top + height,
+			// Tesseract reports confidence as a percentage; Word uses 0–1.
+			Confidence: clampConfidence(conf / 100),
 		})
 	}
 	if err := sc.Err(); err != nil {
@@ -126,3 +129,16 @@ func (b *backend) parseTSV(data []byte) ([]parserails.Word, error) {
 func atoi(s string) int { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }
 
 func atof(s string) float64 { f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64); return f }
+
+// clampConfidence keeps the score inside 0–1. Tesseract reports -1 for rows it
+// could not score, and a word that is recognized at all is not 0-confident, so
+// unscored words get the smallest positive value rather than looking native.
+func clampConfidence(c float64) float64 {
+	switch {
+	case c <= 0:
+		return 0.01
+	case c > 1:
+		return 1
+	}
+	return c
+}

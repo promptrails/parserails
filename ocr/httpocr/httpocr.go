@@ -43,11 +43,12 @@ func New(cfg Config) parserails.OCR {
 
 type wordsResponse struct {
 	Words []struct {
-		Text string  `json:"text"`
-		X0   float64 `json:"x0"`
-		Y0   float64 `json:"y0"`
-		X1   float64 `json:"x1"`
-		Y1   float64 `json:"y1"`
+		Text       string  `json:"text"`
+		X0         float64 `json:"x0"`
+		Y0         float64 `json:"y0"`
+		X1         float64 `json:"x1"`
+		Y1         float64 `json:"y1"`
+		Confidence float64 `json:"confidence"`
 	} `json:"words"`
 }
 
@@ -93,6 +94,7 @@ func (b *backend) Recognize(ctx context.Context, img image.Image) ([]parserails.
 		}
 		words = append(words, parserails.Word{
 			Text: w.Text, X0: w.X0, Y0: w.Y0, X1: w.X1, Y1: w.Y1,
+			Confidence: w.Confidence,
 		})
 	}
 	return words, nil
