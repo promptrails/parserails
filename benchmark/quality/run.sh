@@ -26,7 +26,9 @@ fi
 
 mkdir -p "$outdir"
 start=$(date +%s)
-"$parserails" batch "$corpus" "$outdir" --format markdown -q "$@"
+# Flags before the positional arguments: Go's flag package stops parsing at
+# the first non-flag argument, so anything after them is silently ignored.
+"$parserails" batch --format markdown -q "$@" "$corpus" "$outdir"
 end=$(date +%s)
 
 documents=$(find "$corpus" -type f -name '*.pdf' | wc -l | tr -d ' ')

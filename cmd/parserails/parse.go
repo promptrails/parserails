@@ -71,6 +71,17 @@ func cmdParse(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// -native-office means "do not call LibreOffice". Honour it here rather
+	// than handing the package to ParseData, which always converts: text and
+	// Markdown do not need a page layout, and demanding LibreOffice for them
+	// is exactly what the flag asks us not to do.
+	if *common.nativeOffice {
+		if done, err := writeNativeOffice(data, inputName(fs.Arg(0)), *format); done || err != nil {
+			return err
+		}
+	}
+
 	doc, err := p.ParseData(context.Background(), data, parserails.ReadOptions{
 		Name: inputName(fs.Arg(0)), Pages: *pages, MaxPages: *maxPages,
 	})
@@ -92,4 +103,29 @@ func cmdParse(args []string) error {
 		_, err = fmt.Println(doc.Text())
 		return err
 	}
+}
+
+// writeNativeOffice renders an OOXML package without LibreOffice, reporting
+// whether it handled the request. JSON output is not one it can handle: word
+// boxes need a laid-out page, which a package does not have.
+func writeNativeOffice(data []byte, name, format string) (bool, error) {
+	detected := parserails.Detect(name, data)
+	if !detected.IsOOXML() {
+		return false, nil
+	}
+	if format == "json" {
+		return false, fmt.Errorf(
+			"-format json needs page coordinates, which -native-office cannot produce for %s; "+
+				"drop -native-office (LibreOffice) or use -format text|markdown", detected)
+	}
+	office, err := parserails.ReadOfficeDocument(data, detected)
+	if err != nil {
+		return false, err
+	}
+	if format == "markdown" {
+		_, err = fmt.Print(office.Markdown())
+	} else {
+		_, err = fmt.Println(office.Text())
+	}
+	return true, err
 }

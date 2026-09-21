@@ -55,6 +55,7 @@ func cmdBatch(args []string) error {
 	if len(inputs) == 0 {
 		return fmt.Errorf("no documents found in %s", inDir)
 	}
+	outputs := planOutputs(inputs, inDir, outDir, suffix)
 
 	p, err := parserails.New(opts...)
 	if err != nil {
@@ -81,8 +82,8 @@ func cmdBatch(args []string) error {
 			if err != nil {
 				rel = filepath.Base(in)
 			}
-			out := filepath.Join(outDir, strings.TrimSuffix(rel, filepath.Ext(rel))+suffix)
-			err = convertOne(p, in, out, *format)
+			out := outputs[in]
+			err = convertOne(p, in, out, *format, *common.nativeOffice)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -106,10 +107,16 @@ func cmdBatch(args []string) error {
 	return nil
 }
 
-func convertOne(p *parserails.Parser, in, out, format string) error {
-	doc, err := p.ParseFile(context.Background(), in)
+func convertOne(p *parserails.Parser, in, out, format string, nativeOffice bool) error {
+	text, handled, err := nativeOfficeOutput(in, format, nativeOffice)
 	if err != nil {
 		return err
+	}
+	var doc *parserails.Document
+	if !handled {
+		if doc, err = p.ParseFile(context.Background(), in); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
 		return err
@@ -121,6 +128,10 @@ func convertOne(p *parserails.Parser, in, out, format string) error {
 	}
 	defer func() { _ = f.Close() }()
 
+	if doc == nil {
+		_, err = f.WriteString(text)
+		return err
+	}
 	switch format {
 	case "json":
 		enc := json.NewEncoder(f)
@@ -132,6 +143,62 @@ func convertOne(p *parserails.Parser, in, out, format string) error {
 		_, err = f.WriteString(doc.Text())
 	}
 	return err
+}
+
+// nativeOfficeOutput renders an OOXML package without LibreOffice when the
+// operator asked for that, reporting whether it did.
+func nativeOfficeOutput(path, format string, nativeOffice bool) (string, bool, error) {
+	if !nativeOffice || format == "json" {
+		return "", false, nil
+	}
+	// #nosec G304 -- path came from the input directory the operator named.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	detected := parserails.Detect(path, data)
+	if !detected.IsOOXML() {
+		return "", false, nil
+	}
+	office, err := parserails.ReadOfficeDocument(data, detected)
+	if err != nil {
+		return "", false, err
+	}
+	if format == "markdown" {
+		return office.Markdown(), true, nil
+	}
+	return office.Text(), true, nil
+}
+
+// planOutputs maps every input to its output file, keeping the extension of
+// any input whose stem collides with another's.
+//
+// "report.pdf" and "report.docx" in one directory both want "report.txt", and
+// two workers writing the same file silently lose one of the two documents
+// while reporting both as converted.
+func planOutputs(inputs []string, inDir, outDir, suffix string) map[string]string {
+	stems := make(map[string]int, len(inputs))
+	rels := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		rel, err := filepath.Rel(inDir, in)
+		if err != nil {
+			rel = filepath.Base(in)
+		}
+		rels[in] = rel
+		stems[strings.TrimSuffix(rel, filepath.Ext(rel))]++
+	}
+
+	out := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		rel := rels[in]
+		stem := strings.TrimSuffix(rel, filepath.Ext(rel))
+		name := stem + suffix
+		if stems[stem] > 1 {
+			name = rel + suffix // report.pdf.txt, report.docx.txt
+		}
+		out[in] = filepath.Join(outDir, name)
+	}
+	return out
 }
 
 func outputSuffix(format string) (string, error) {

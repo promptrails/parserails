@@ -35,7 +35,7 @@ curl -sL https://example.com/report.pdf | parserails parse -
 | `--ocr-url` | — | OCR server URL, with `--ocr http` |
 | `--lang` | `eng` | OCR language |
 | `--image-ocr` | off | also [read figures](ocr.md) on pages that have text |
-| `--native-office` | off | read [DOCX/XLSX/PPTX natively](office.md), without LibreOffice |
+| `--native-office` | off | read [DOCX/XLSX/PPTX natively](office.md), without LibreOffice (text and Markdown output only) |
 | `--password` | — | password for encrypted documents |
 | `--timeout` | `0` | give up on a document after this long |
 
@@ -65,6 +65,10 @@ parserails parse report.docx                      # office doc via LibreOffice
 since heading ranking and figure placement need them. See
 [Blocks & Markdown](markdown.md).
 
+`--native-office` applies to `--format text` and `--format markdown`, where no
+page layout is needed. `--format json` reports word boxes, which only exist
+once a page has been laid out, so it still needs LibreOffice and says so.
+
 ## batch
 
 Parse a directory of documents concurrently, mirroring the input tree into the
@@ -86,6 +90,11 @@ parserails batch --ext .pdf --recursive=false ./inbox ./out
 
 A document that fails is reported on stderr and the batch continues; the exit
 status is non-zero if any failed.
+
+Output names mirror the input tree with the extension replaced. Two inputs
+that would collide — `report.pdf` and `report.docx` in one directory both want
+`report.txt` — keep their extension instead (`report.pdf.txt`,
+`report.docx.txt`), so neither silently overwrites the other.
 
 ## extract
 
