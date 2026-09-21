@@ -168,6 +168,7 @@ func docxParagraph(dec *xml.Decoder, start xml.StartElement) (Block, bool) {
 		style    string
 		numbered bool
 		depth    = 1
+		skipAt   int
 	)
 	for depth > 0 {
 		tok, err := dec.Token()
@@ -177,6 +178,9 @@ func docxParagraph(dec *xml.Decoder, start xml.StartElement) (Block, bool) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			depth++
+			if skipAt == 0 && docxSkippable(t.Name.Local) {
+				skipAt = depth
+			}
 			switch t.Name.Local {
 			case "pStyle":
 				style = attr(t, "val")
@@ -188,12 +192,17 @@ func docxParagraph(dec *xml.Decoder, start xml.StartElement) (Block, bool) {
 				text.WriteByte('\n')
 			}
 		case xml.EndElement:
+			if skipAt != 0 && depth == skipAt {
+				skipAt = 0
+			}
 			depth--
 			if depth == 0 && t.Name.Local == start.Name.Local {
 				break
 			}
 		case xml.CharData:
-			text.Write(t)
+			if skipAt == 0 {
+				text.Write(t)
+			}
 		}
 	}
 
@@ -212,6 +221,14 @@ func docxParagraph(dec *xml.Decoder, start xml.StartElement) (Block, bool) {
 		return Block{Kind: BlockListItem, Text: rest, Marker: marker, Ordered: ordered}, true
 	}
 	return Block{Kind: BlockParagraph, Text: content}, true
+}
+
+// docxSkippable reports whether an element's character data is something other
+// than the document's text: the original of a tracked deletion, or the source
+// of a field code like " HYPERLINK … ". Both sit in ordinary runs and would
+// otherwise be read as prose.
+func docxSkippable(name string) bool {
+	return name == "delText" || name == "instrText"
 }
 
 // headingStyleLevel maps Word's built-in styles onto heading depths.
@@ -236,11 +253,12 @@ func headingStyleLevel(style string) (int, bool) {
 // docxTable reads one <w:tbl> into a table block with its real cells.
 func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 	var (
-		rows  [][]Cell
-		row   []Cell
-		cell  strings.Builder
-		depth = 1
-		inCel bool
+		rows   [][]Cell
+		row    []Cell
+		cell   strings.Builder
+		depth  = 1
+		skipAt int
+		inCel  bool
 	)
 	for depth > 0 {
 		tok, err := dec.Token()
@@ -250,16 +268,37 @@ func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			depth++
+			if skipAt == 0 && docxSkippable(t.Name.Local) {
+				skipAt = depth
+			}
 			switch t.Name.Local {
 			case "tr":
 				row = nil
 			case "tc":
 				inCel = true
 				cell.Reset()
+			case "tab":
+				if inCel && skipAt == 0 {
+					cell.WriteByte('\t')
+				}
+			case "br":
+				if inCel && skipAt == 0 {
+					cell.WriteByte('\n')
+				}
 			}
 		case xml.EndElement:
+			if skipAt != 0 && depth == skipAt {
+				skipAt = 0
+			}
 			depth--
 			switch t.Name.Local {
+			case "p":
+				// A cell holds paragraphs, not one run of text: without a
+				// boundary here "First paragraph" and "Second paragraph"
+				// concatenate into one mangled word.
+				if inCel {
+					cell.WriteByte('\n')
+				}
 			case "tc":
 				inCel = false
 				row = append(row, Cell{Text: strings.TrimSpace(cell.String())})
@@ -272,7 +311,7 @@ func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 				break
 			}
 		case xml.CharData:
-			if inCel {
+			if inCel && skipAt == 0 {
 				cell.Write(t)
 			}
 		}

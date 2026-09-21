@@ -55,6 +55,48 @@ func TestReadOfficeDocumentDOCX(t *testing.T) {
 	}
 }
 
+func TestDocxCellsKeepParagraphBoundaries(t *testing.T) {
+	docx := zipArchive(map[string][]byte{
+		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body><w:tbl><w:tr>` +
+			`<w:tc><w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>` +
+			`<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:tc>` +
+			`<w:tc><w:p><w:r><w:t>Other</w:t></w:r></w:p></w:tc>` +
+			`</w:tr></w:tbl></w:body></w:document>`),
+	})
+	doc, err := ReadOfficeDocument(docx, FormatDOCX)
+	if err != nil {
+		t.Fatalf("ReadOfficeDocument: %v", err)
+	}
+	cell := doc.Blocks[0].Rows[0][0].Text
+	if cell != "First paragraph\nSecond paragraph" {
+		t.Fatalf("cell = %q, want the paragraphs separated", cell)
+	}
+	// A pipe table cannot hold a newline; the break survives as <br>.
+	if md := doc.Markdown(); !strings.Contains(md, "First paragraph<br>Second paragraph") {
+		t.Errorf("markdown = %q", md)
+	}
+}
+
+func TestDocxSkipsTrackedDeletionsAndFieldCodes(t *testing.T) {
+	docx := zipArchive(map[string][]byte{
+		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body><w:p>` +
+			`<w:r><w:t>The rate is </w:t></w:r>` +
+			`<w:del><w:r><w:delText>four</w:delText></w:r></w:del>` +
+			`<w:ins><w:r><w:t>five</w:t></w:r></w:ins>` +
+			`<w:r><w:instrText> HYPERLINK "http://example.com" </w:instrText></w:r>` +
+			`<w:r><w:t> percent.</w:t></w:r>` +
+			`</w:p></w:body></w:document>`),
+	})
+	doc, err := ReadOfficeDocument(docx, FormatDOCX)
+	if err != nil {
+		t.Fatalf("ReadOfficeDocument: %v", err)
+	}
+	// The accepted revision reads; the deleted original and the field code do not.
+	if got := doc.Blocks[0].Text; got != "The rate is five percent." {
+		t.Fatalf("paragraph = %q", got)
+	}
+}
+
 func TestReadOfficeDocumentXLSX(t *testing.T) {
 	xlsx := zipArchive(map[string][]byte{
 		"xl/workbook.xml": []byte(`<workbook xmlns:r="x"><sheets>` +

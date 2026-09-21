@@ -112,11 +112,18 @@ func writeRow(b *strings.Builder, row []Cell, width int) {
 	for i := 0; i < width; i++ {
 		text := ""
 		if i < len(row) {
-			text = escapePipes(strings.TrimSpace(row[i].Text))
+			text = escapeCell(strings.TrimSpace(row[i].Text))
 		}
 		b.WriteString(" " + text + " |")
 	}
 	b.WriteString("\n")
 }
 
-func escapePipes(s string) string { return strings.ReplaceAll(s, "|", `\|`) }
+// escapeCell makes a cell safe for a pipe table: a literal pipe would end the
+// cell, and a newline would end the row. Multi-paragraph cells keep their
+// break as <br>, which GitHub-flavoured Markdown renders.
+func escapeCell(s string) string {
+	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\n", "<br>")
+}
