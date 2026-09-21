@@ -232,14 +232,20 @@ func parseOle10Native(data []byte) (Child, bool) {
 		return Child{Name: name, Data: payload}, true
 	}
 
-	// Fallback: the payload starts at the first signature we recognize.
+	// Fallback: the payload starts at the earliest signature in the stream —
+	// earliest in the file, not first in this list, or a ZIP whose contents
+	// mention "%PDF-" would be cut at the mention.
+	start := -1
 	for _, magic := range [][]byte{[]byte("%PDF-"), []byte("PK\x03\x04"), {0xFF, 0xD8, 0xFF}, []byte("\x89PNG")} {
-		if i := bytes.Index(data, magic); i >= 0 {
-			payload := data[i:]
-			return Child{Name: "payload" + Sniff(payload).Ext(), Data: payload}, true
+		if i := bytes.Index(data, magic); i >= 0 && (start < 0 || i < start) {
+			start = i
 		}
 	}
-	return Child{}, false
+	if start < 0 {
+		return Child{}, false
+	}
+	payload := data[start:]
+	return Child{Name: "payload" + Sniff(payload).Ext(), Data: payload}, true
 }
 
 func sanitizeChildName(name string) string {

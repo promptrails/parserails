@@ -243,6 +243,40 @@ func TestExtractReadsOutlookMessages(t *testing.T) {
 	}
 }
 
+func TestExtractReadsAMessageAttachedToAMessage(t *testing.T) {
+	p := newTestParser(t)
+	// "Forward as attachment": the attachment's data property is a storage
+	// holding the nested message's own property set, not a stream.
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__substg1.0_0037001F", Data: utf16Bytes("Fwd: contract")},
+		{Name: "__substg1.0_1000001F", Data: utf16Bytes("See below.")},
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3707001F", Data: utf16Bytes("original.msg")},
+			{Name: "__substg1.0_3701000D", Children: []cfbTestEntry{
+				{Name: "__substg1.0_0037001F", Data: utf16Bytes("Signed contract")},
+				{Name: "__substg1.0_1000001F", Data: utf16Bytes("Inner body text")},
+			}},
+		}},
+	})
+
+	node, err := p.Extract(context.Background(), msg, ExtractOptions{ReadOptions: ReadOptions{Name: "fwd.msg"}})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(node.Children) != 1 {
+		t.Fatalf("children = %s", treeSummary(node))
+	}
+	child := node.Children[0]
+	// The nested message's text comes out; its raw property streams do not
+	// stand in for the attachment's contents.
+	if !strings.Contains(child.Text, "Signed contract") || !strings.Contains(child.Text, "Inner body text") {
+		t.Fatalf("nested message = %q", child.Text)
+	}
+	if child.Format != FormatText {
+		t.Errorf("format = %s, want txt", child.Format)
+	}
+}
+
 func TestExtractReadsOOXMLEmbeddings(t *testing.T) {
 	p := newTestParser(t)
 	docx := zipArchive(map[string][]byte{
