@@ -222,6 +222,64 @@ func TestFigureBlocksArePlacedInReadingOrder(t *testing.T) {
 	}
 }
 
+func TestColumnsStayInOrderWhenEachHasSeveralBlocks(t *testing.T) {
+	var runs []textRun
+	for i := 0; i < 6; i++ {
+		y := 690 - float64(i)*16
+		if i >= 3 {
+			y -= 30 // a paragraph break, so each column yields two blocks
+		}
+		runs = append(runs,
+			textRun{Text: leftColumnLine(i), X: 72, Y: y, Size: 11},
+			textRun{Text: rightColumnLine(i), X: 330, Y: y, Size: 11})
+	}
+	doc := parseRuns(t, runs...)
+
+	md := doc.Markdown()
+	if strings.Index(md, "right column line one") < strings.Index(md, "left column line six") {
+		t.Fatalf("columns interleaved by vertical position:\n%s", md)
+	}
+}
+
+func TestBlocksKeepTheRequestedPageOrder(t *testing.T) {
+	p := newTestParser(t, WithFontInfo())
+	pdf := pdfWithPages([][]textRun{
+		{{Text: "Page one carries a sentence of text.", X: 72, Y: 700, Size: 11}},
+		{{Text: "Page two carries a sentence of text.", X: 72, Y: 700, Size: 11}},
+	})
+	doc, err := p.ParseData(context.Background(), pdf, ReadOptions{Pages: "2,1"})
+	if err != nil {
+		t.Fatalf("ParseData: %v", err)
+	}
+	md := doc.Markdown()
+	if strings.Index(md, "Page two") > strings.Index(md, "Page one") {
+		t.Fatalf("pages were re-sorted; 2,1 was requested:\n%s", md)
+	}
+}
+
+func TestParagraphStopsWhereAListBegins(t *testing.T) {
+	doc := parseRuns(t,
+		textRun{Text: "The quarter closed with these results:", X: 72, Y: 700, Size: 11},
+		textRun{Text: "1. Renewals up twelve percent", X: 72, Y: 686, Size: 11},
+		textRun{Text: "2. Churn down to four percent", X: 72, Y: 672, Size: 11},
+	)
+	var kinds []string
+	for _, b := range doc.Blocks() {
+		kinds = append(kinds, string(b.Kind))
+	}
+	if got := strings.Join(kinds, " "); got != "paragraph list_item list_item" {
+		t.Fatalf("kinds = %q, want the list kept out of the paragraph", got)
+	}
+}
+
+func TestAlignRowsMergesInsteadOfDropping(t *testing.T) {
+	rows := [][]Cell{{{Text: "left", X0: 100}, {Text: "right", X0: 118}}}
+	got := alignRows(rows, []float64{110})
+	if len(got) != 1 || got[0][0].Text != "left right" {
+		t.Fatalf("aligned = %+v, want both cells kept", got)
+	}
+}
+
 func TestListMarker(t *testing.T) {
 	cases := []struct {
 		in      string

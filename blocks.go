@@ -101,25 +101,38 @@ func (d *Document) BlocksWith(opt BlockOptions) []Block {
 			lines = dropFurniture(lines, page, furniture)
 		}
 		body := bodyTextSize(lines)
+		var text []Block
 		for _, group := range readingOrder(lines, page) {
-			out = append(out, classify(group, page, body)...)
+			text = append(text, classify(group, page, body)...)
 		}
-		out = append(out, figureBlocks(page)...)
+		out = append(out, placeFigures(text, figureBlocks(page))...)
 	}
-	sortBlocks(out)
 	return out
 }
 
-// sortBlocks puts figures back where they belong: blocks are built per region,
-// figures per page, so a final pass by page and vertical position interleaves
-// them without disturbing the order within a region.
-func sortBlocks(blocks []Block) {
-	sort.SliceStable(blocks, func(i, j int) bool {
-		if blocks[i].Page != blocks[j].Page {
-			return blocks[i].Page < blocks[j].Page
+// placeFigures slots a page's figures into its block sequence by vertical
+// position, without reordering the blocks themselves.
+//
+// Sorting the whole page by position instead would undo the reading order
+// that was just established: on a two-column page it interleaves the columns
+// again, and across pages it re-sorts a selection the caller asked for in
+// another order.
+func placeFigures(blocks, figures []Block) []Block {
+	if len(figures) == 0 {
+		return blocks
+	}
+	sort.SliceStable(figures, func(i, j int) bool { return figures[i].Y1 > figures[j].Y1 })
+
+	out := make([]Block, 0, len(blocks)+len(figures))
+	next := 0
+	for _, b := range blocks {
+		for next < len(figures) && figures[next].Y1 > b.Y1 {
+			out = append(out, figures[next])
+			next++
 		}
-		return blocks[i].Y1 > blocks[j].Y1
-	})
+		out = append(out, b)
+	}
+	return append(out, figures[next:]...)
 }
 
 func figureBlocks(page Page) []Block {
@@ -467,7 +480,7 @@ func classify(lines []Line, page Page, bodySize float64) []Block {
 		block := blockFrom(BlockParagraph, line, page)
 		block.Text = line.Text()
 		i++
-		for i < len(lines) && continuesParagraph(lines[i-1], lines[i]) {
+		for i < len(lines) && continuesParagraph(lines[i-1], lines[i]) && !startsBlock(lines[i], bodySize) {
 			block.Text = joinWrapped(block.Text, lines[i].Text())
 			block = growBlock(block, lines[i])
 			i++
@@ -505,6 +518,18 @@ func continuesParagraph(prev, next Line) bool {
 	}
 	// A size change means a heading or a caption, not a continuation.
 	return math.Abs(lineSize(prev)-lineSize(next)) <= 0.5
+}
+
+// startsBlock reports whether a line opens something of its own — a list
+// item, a heading — rather than continuing the text above it. Spacing alone
+// cannot tell: a normally spaced list under an introductory sentence looks
+// exactly like the next line of that sentence.
+func startsBlock(l Line, bodySize float64) bool {
+	if _, _, _, ok := listMarker(l.Text()); ok {
+		return true
+	}
+	_, isHeading := headingLevel(l, bodySize)
+	return isHeading
 }
 
 func continuesItem(prev, next Line, itemLeft float64) bool {
@@ -702,12 +727,22 @@ func sameColumns(anchors []float64, cells []Cell) bool {
 
 // alignRows places every row's cells under the column they start in, padding
 // the gaps so the table is rectangular.
+//
+// Two cells of one row can resolve to the same column when the anchors came
+// from a differently spaced row. They are merged rather than overwritten:
+// a slightly wrong table beats a table with text silently missing from it.
 func alignRows(rows [][]Cell, anchors []float64) [][]Cell {
 	out := make([][]Cell, 0, len(rows))
 	for _, row := range rows {
 		aligned := make([]Cell, len(anchors))
 		for _, c := range row {
-			aligned[nearestAnchor(anchors, c.X0)] = c
+			at := nearestAnchor(anchors, c.X0)
+			if existing := aligned[at]; existing.Text != "" {
+				c.Text = existing.Text + " " + c.Text
+				c.X0, c.Y0 = min(existing.X0, c.X0), min(existing.Y0, c.Y0)
+				c.X1, c.Y1 = max(existing.X1, c.X1), max(existing.Y1, c.Y1)
+			}
+			aligned[at] = c
 		}
 		out = append(out, aligned)
 	}

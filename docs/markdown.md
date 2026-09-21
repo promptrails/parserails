@@ -70,8 +70,10 @@ anchors are shared across rows so ragged rows still line up. A first row of
 complete cells becomes the header.
 
 **Figures** need `WithImages` (or `WithImageOCR`), which records each page's
-raster objects. They render as `![](img_pN_K.png)` placeholders in reading
-order.
+raster objects. They render as `![](img_pN_K.png)` placeholders, slotted into
+the block sequence by vertical position — the text blocks themselves are never
+reordered, so columns stay in reading order and a page selection stays in the
+order it was asked for.
 
 ## Running headers and footers
 
