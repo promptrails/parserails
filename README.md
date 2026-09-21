@@ -212,6 +212,12 @@ results := p.ParseFiles(ctx, paths, 4)               // concurrent batch
 `ParseFile` converts office documents to PDF via LibreOffice, then parses.
 `ParseFiles` runs a bounded-concurrency batch and captures per-file errors.
 
+## Agent skill
+
+[`SKILL.md`](./SKILL.md) is a ready-made skill file for coding agents: which
+command fits which task, how to route scanned documents, and how to read the
+output. Copy it into your agent's skills directory.
+
 ## Examples
 
 Runnable, self-contained examples (each its own module + Dockerfile) live in
