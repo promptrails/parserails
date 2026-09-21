@@ -40,7 +40,7 @@ actually need.
 | Recursive containers (ZIP/EML/MSG/OLE/attachments) | — | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | Per-document timeouts (`WithTimeout`) | — | ✅ |
-| CLI (`go install`) | — | ✅ |
+| CLI: parse/batch/extract/render/is-complex, stdin | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |
 | Markdown output (headings, tables, lists, figures) | — | ✅ |
 | Layout blocks as data (`Blocks`) | — | ✅ |
@@ -59,12 +59,15 @@ As a command:
 ```bash
 go install github.com/promptrails/parserails/cmd/parserails@latest
 
-parserails parse      invoice.pdf      # extract text
-parserails parse      --json report.docx # JSON, office docs via LibreOffice
-parserails render     --dpi 150 doc.pdf  # render page 0 → doc-p0.png
-parserails parse      --format markdown doc.pdf # structured markdown
-parserails is-complex scan.pdf           # which pages need OCR?
-parserails extract    bundle.zip         # walk everything inside a file
+parserails parse      invoice.pdf               # reconstructed text
+parserails parse      --format markdown doc.pdf  # headings, tables, lists
+parserails parse      --json report.docx         # JSON with boxes
+parserails batch      ./corpus ./out             # a directory, concurrently
+parserails extract    bundle.zip                 # everything inside a file
+parserails is-complex scan.pdf                   # which pages need OCR?
+parserails render     --dpi 150 doc.pdf          # page 0 → doc-p0.png
+
+curl -sL https://example.com/report.pdf | parserails parse -
 ```
 
 No system dependencies for PDF. PDFium ships as a WASM module loaded at runtime

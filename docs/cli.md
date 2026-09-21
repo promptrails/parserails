@@ -6,30 +6,103 @@ ParseRails ships a command-line tool.
 go install github.com/promptrails/parserails/cmd/parserails@latest
 ```
 
-The PDF engine is cgo-free, so the binary has no native dependencies. Office
-conversion needs `libreoffice`/`soffice` on PATH; OCR needs `tesseract` (only
-when you enable it).
+The PDF engine is cgo-free, so the binary has no native dependencies.
+LibreOffice is only needed for office formats — and only when you do not use
+`--native-office`; OCR needs `tesseract`, or a server with `--ocr http`.
+
+```
+parserails parse      [flags] <file>        text, JSON or Markdown
+parserails batch      [flags] <in> <out>    parse a directory, concurrently
+parserails extract    [flags] <file>        walk a file and everything inside it
+parserails render     [flags] <file>        render a page to a PNG image
+parserails is-complex [flags] <file>        report which pages need OCR
+parserails version
+```
+
+Every command that takes an input file accepts `-` for standard input:
+
+```bash
+curl -sL https://example.com/report.pdf | parserails parse -
+```
+
+## Shared flags
+
+`parse`, `batch` and `extract` share the flags that open a document:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--ocr` | `none` | `none`, `tesseract`, or `http` |
+| `--ocr-url` | — | OCR server URL, with `--ocr http` |
+| `--lang` | `eng` | OCR language |
+| `--image-ocr` | off | also [read figures](ocr.md) on pages that have text |
+| `--native-office` | off | read [DOCX/XLSX/PPTX natively](office.md), without LibreOffice |
+| `--password` | — | password for encrypted documents |
+| `--timeout` | `0` | give up on a document after this long |
 
 ## parse
 
-Extract spatial text from a PDF or office document.
-
 ```bash
-parserails parse invoice.pdf                  # one line of text per word
-parserails parse --json invoice.pdf           # full JSON document with boxes
-parserails parse --granularity line notes.pdf # line-level boxes (faster)
-parserails parse --font invoice.pdf           # include font sizes
-parserails parse --ocr tesseract scan.pdf     # OCR scanned pages
-parserails parse report.docx                  # office doc via LibreOffice
+parserails parse invoice.pdf                      # reconstructed plain text
+parserails parse --format json invoice.pdf        # pages, words, boxes
+parserails parse --format markdown report.pdf     # headings, tables, lists
+parserails parse --pages 1-5,10 long.pdf          # only these pages
+parserails parse --granularity line notes.pdf     # line-level boxes (faster)
+parserails parse --ocr tesseract scan.pdf         # OCR scanned pages
+parserails parse report.docx                      # office doc via LibreOffice
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--json` | off | emit the JSON document (pages, words, boxes) |
+| `--format` | `text` | `text`, `json` or `markdown` |
+| `--json` | off | shorthand for `--format json` |
+| `--pages` | all | 1-based selection, e.g. `"1-5,10"` |
+| `--max-pages` | — | cap how many pages are parsed |
 | `--granularity` | `word` | `word` or `line` |
 | `--font` | off | collect font sizes (word granularity) |
-| `--ocr` | `none` | `none` or `tesseract` |
-| `--lang` | `eng` | OCR language |
+| `--keep-headers-footers` | off | keep running headers and footers in Markdown |
+
+`--format markdown` turns on font metrics and image collection by itself,
+since heading ranking and figure placement need them. See
+[Blocks & Markdown](markdown.md).
+
+## batch
+
+Parse a directory of documents concurrently, mirroring the input tree into the
+output directory.
+
+```bash
+parserails batch ./invoices ./text
+parserails batch --format markdown --concurrency 8 ./corpus ./md
+parserails batch --ext .pdf --recursive=false ./inbox ./out
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `text` | `text` (`.txt`), `json` (`.json`) or `markdown` (`.md`) |
+| `--ext` | all | only process this extension |
+| `--recursive` | `true` | descend into subdirectories |
+| `--concurrency` | CPU count | documents parsed at once |
+| `-q` | off | only report failures |
+
+A document that fails is reported on stderr and the batch continues; the exit
+status is non-zero if any failed.
+
+## extract
+
+Walk a file and everything inside it — see [Containers](containers.md).
+
+```bash
+parserails extract bundle.zip                  # a tree view
+parserails extract --format text mail.eml      # all the text, depth first
+parserails extract --format json --list a.zip  # inventory, nothing parsed
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `tree` | `tree`, `text` or `json` |
+| `--max-depth` | `8` | how deep to descend (`-1` = no limit) |
+| `--max-files` | `512` | cap how many files are opened |
+| `--list` | off | inventory only; do not parse the documents |
 
 ## render
 
@@ -45,55 +118,33 @@ parserails render -o out.png doc.pdf          # explicit output path
 |------|---------|-------------|
 | `--page` | `0` | page index (0-based) |
 | `--dpi` | `150` | render resolution |
-| `-o` | `<file>-p<page>.png` | output path |
+| `--password` | — | password for encrypted documents |
+| `-o` | `<file>-p<page>.png` | output path (required when reading stdin) |
+
+## is-complex
+
+Report, page by page, whether a document needs OCR. Per-page JSON goes to
+stdout and a one-line verdict to stderr.
+
+```bash
+parserails is-complex report.pdf
+parserails is-complex --compact report.pdf | jq '[.[] | select(.needs_ocr) | .page]'
+parserails is-complex -q report.pdf && parserails parse report.pdf
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--compact` | off | dense JSON instead of indented |
+| `--pages` | all | 1-based selection |
+| `--max-pages` | — | cap how many pages are inspected |
+| `--password` | — | password for encrypted documents |
+| `-q` | off | suppress the stderr verdict |
+
+Exit codes: `0` simple, `2` at least one page needs OCR, `1` error. See
+[Complexity & Routing](complexity.md).
 
 ## version
 
 ```bash
 parserails version
 ```
-
-## `parserails parse --format`
-
-| Value | Output |
-|-------|--------|
-| `text` (default) | reconstructed plain text, lines and page breaks intact |
-| `json` | the full `Document`: pages, words, boxes |
-| `markdown` | [headings, tables, lists and figures](markdown.md) |
-
-`--format markdown` turns on font metrics and image collection by itself, since
-heading ranking and figure placement need them. `--keep-headers-footers` keeps
-running headers, footers and page numbers that are otherwise dropped.
-
-## `parserails extract`
-
-Walk a file and everything inside it — see [Containers](containers.md).
-
-| Flag | Meaning |
-|------|---------|
-| `--format` | `tree` (default), `text`, `json` |
-| `--max-depth` | how deep to descend (0 = default 8, -1 = no limit) |
-| `--max-files` | cap how many files are opened (0 = default 512) |
-| `--list` | inventory only; do not parse the documents |
-| `--ocr`, `--lang` | OCR backend for scanned pages and image attachments |
-| `--password` | password for encrypted documents |
-
-## `parserails is-complex`
-
-Report, page by page, whether a document needs OCR. Per-page JSON goes to
-stdout and a one-line verdict to stderr.
-
-```bash
-parserails is-complex [flags] <file>   # or "-" to read stdin
-```
-
-| Flag | Meaning |
-|------|---------|
-| `--compact` | dense JSON instead of indented |
-| `--pages` | 1-based selection, e.g. `"1-5,10"` |
-| `--max-pages` | cap how many pages are inspected |
-| `--password` | password for encrypted documents |
-| `-q` | suppress the stderr verdict |
-
-Exit codes: `0` simple, `2` at least one page needs OCR, `1` error. See
-[Complexity & Routing](complexity.md).
