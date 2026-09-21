@@ -8,6 +8,7 @@
   - [Format Detection](formats.md)
   - [Page Screenshots](screenshots.md)
   - [OCR](ocr.md)
+  - [Complexity & Routing](complexity.md)
   - [Office Formats & Batches](office.md)
 
 - **Reference**

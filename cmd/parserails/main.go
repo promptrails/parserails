@@ -2,17 +2,20 @@
 //
 //	go install github.com/promptrails/parserails/cmd/parserails@latest
 //
-//	parserails parse   [flags] <file>   extract spatial text (plain or JSON)
-//	parserails render  [flags] <file>   render a page to a PNG image
-//	parserails version                  print version
+//	parserails parse      [flags] <file>   extract spatial text (plain or JSON)
+//	parserails render     [flags] <file>   render a page to a PNG image
+//	parserails is-complex [flags] <file>   report which pages need OCR
+//	parserails version                     print version
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"image/png"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -32,6 +35,8 @@ func main() {
 		err = cmdParse(os.Args[2:])
 	case "render":
 		err = cmdRender(os.Args[2:])
+	case "is-complex":
+		err = cmdIsComplex(os.Args[2:])
 	case "version":
 		fmt.Println(version())
 	case "-h", "--help", "help":
@@ -42,20 +47,31 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		var verdict complexVerdict
+		if errors.As(err, &verdict) {
+			os.Exit(verdict.code)
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
+// complexVerdict carries is-complex's exit code out of the command without
+// pretending the document was an error.
+type complexVerdict struct{ code int }
+
+func (complexVerdict) Error() string { return "document needs OCR" }
+
 func usage() {
 	fmt.Fprint(os.Stderr, `parserails — fast, cgo-free document parsing
 
 usage:
-  parserails parse  [flags] <file>   extract spatial text (PDF or office doc)
-  parserails render [flags] <file>   render a page to PNG
+  parserails parse      [flags] <file>   extract spatial text (PDF or office doc)
+  parserails render     [flags] <file>   render a page to PNG
+  parserails is-complex [flags] <file>   report which pages need OCR
   parserails version
 
-run "parserails parse -h" or "parserails render -h" for flags
+run "parserails <command> -h" for flags
 `)
 }
 
@@ -180,4 +196,72 @@ func version() string {
 		return "parserails " + info.Main.Version
 	}
 	return "parserails (dev)"
+}
+
+func cmdIsComplex(args []string) error {
+	fs := flag.NewFlagSet("is-complex", flag.ExitOnError)
+	compact := fs.Bool("compact", false, "emit dense JSON instead of indented")
+	pages := fs.String("pages", "", `pages to inspect, 1-based (e.g. "1-5,10")`)
+	maxPages := fs.Int("max-pages", 0, "cap how many pages are inspected")
+	password := fs.String("password", "", "password for encrypted documents")
+	quiet := fs.Bool("q", false, "suppress the verdict on stderr")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: parserails is-complex [flags] <file>")
+		fs.PrintDefaults()
+		fmt.Fprintln(os.Stderr, "\nexit codes: 0 simple, 2 needs OCR, 1 error")
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return fmt.Errorf("expected exactly one input file")
+	}
+
+	p, err := parserails.New()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = p.Close() }()
+
+	data, err := readInput(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	result, err := p.Inspect(context.Background(), data, parserails.ReadOptions{
+		Name: fs.Arg(0), Password: *password, Pages: *pages, MaxPages: *maxPages,
+	})
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	if !*compact {
+		enc.SetIndent("", "  ")
+	}
+	if err := enc.Encode(result.Pages); err != nil {
+		return err
+	}
+
+	ocrPages := result.OCRPages()
+	if !*quiet {
+		verdict := "SIMPLE"
+		if len(ocrPages) > 0 {
+			verdict = "COMPLEX"
+		}
+		fmt.Fprintf(os.Stderr, "%s — %d/%d page(s) need OCR\n", verdict, len(ocrPages), len(result.Pages))
+	}
+	if len(ocrPages) > 0 {
+		return complexVerdict{code: 2}
+	}
+	return nil
+}
+
+// readInput reads a file, or standard input when the path is "-".
+func readInput(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	// #nosec G304 -- path is what the operator typed on the command line.
+	return os.ReadFile(path)
 }

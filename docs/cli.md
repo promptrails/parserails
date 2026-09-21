@@ -52,3 +52,23 @@ parserails render -o out.png doc.pdf          # explicit output path
 ```bash
 parserails version
 ```
+
+## `parserails is-complex`
+
+Report, page by page, whether a document needs OCR. Per-page JSON goes to
+stdout and a one-line verdict to stderr.
+
+```bash
+parserails is-complex [flags] <file>   # or "-" to read stdin
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--compact` | dense JSON instead of indented |
+| `--pages` | 1-based selection, e.g. `"1-5,10"` |
+| `--max-pages` | cap how many pages are inspected |
+| `--password` | password for encrypted documents |
+| `-q` | suppress the stderr verdict |
+
+Exit codes: `0` simple, `2` at least one page needs OCR, `1` error. See
+[Complexity & Routing](complexity.md).

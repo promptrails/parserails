@@ -13,29 +13,49 @@ type textRun struct {
 	Size float64
 }
 
+// imageBox is a raster image drawn on a test page, in the same coordinates.
+type imageBox struct {
+	X, Y, W, H float64
+}
+
+// pdfPage describes one page of a test document.
+type pdfPage struct {
+	Runs   []textRun
+	Images []imageBox
+}
+
 const (
 	testPageWidth  = 612.0
 	testPageHeight = 792.0
 )
 
-// pdfWithPages builds a valid multi-page PDF drawing the given runs, computing
-// real xref offsets so PDFium can parse it. Tests use it instead of binary
-// fixtures so the geometry under test is visible in the test itself.
-func pdfWithPages(pages [][]textRun) []byte {
-	var (
-		objects  []string
-		pageRefs []string
-	)
-	// Object numbering: 1 = catalog, 2 = page tree, 3 = font, then two objects
-	// (page, content) per page.
-	objects = append(objects,
+// pdfWithPageSpecs builds a valid multi-page PDF, computing real xref offsets
+// so PDFium can parse it. Tests use it instead of binary fixtures so the
+// geometry under test is visible in the test itself.
+func pdfWithPageSpecs(pages []pdfPage) []byte {
+	// Object 1 is the catalog, 2 the page tree, 3 the font; everything else is
+	// appended as it is built.
+	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
-		"", // placeholder, page tree needs the kid references below
+		"", // page tree, filled in once the kids are known
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-	)
-	for _, runs := range pages {
+	}
+	add := func(body string) int {
+		objects = append(objects, body)
+		return len(objects)
+	}
+
+	var pageRefs []string
+	for _, page := range pages {
 		var content strings.Builder
-		for _, r := range runs {
+		xobjects := make([]string, 0, len(page.Images))
+		for i, img := range page.Images {
+			num := add(imageXObject())
+			name := fmt.Sprintf("Im%d", i+1)
+			xobjects = append(xobjects, fmt.Sprintf("/%s %d 0 R", name, num))
+			fmt.Fprintf(&content, "q %g 0 0 %g %g %g cm /%s Do Q\n", img.W, img.H, img.X, img.Y, name)
+		}
+		for _, r := range page.Runs {
 			size := r.Size
 			if size == 0 {
 				size = 12
@@ -43,14 +63,17 @@ func pdfWithPages(pages [][]textRun) []byte {
 			fmt.Fprintf(&content, "BT /F1 %g Tf %g %g Td (%s) Tj ET\n",
 				size, r.X, r.Y, escapePDFString(r.Text))
 		}
-		contentNum := len(objects) + 2
-		objects = append(objects, fmt.Sprintf(
-			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] /Contents %d 0 R "+
-				"/Resources << /Font << /F1 3 0 R >> >> >>",
-			testPageWidth, testPageHeight, contentNum))
-		pageRefs = append(pageRefs, fmt.Sprintf("%d 0 R", len(objects)))
-		objects = append(objects, fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream",
-			content.Len(), content.String()))
+
+		resources := "/Font << /F1 3 0 R >>"
+		if len(xobjects) > 0 {
+			resources += " /XObject << " + strings.Join(xobjects, " ") + " >>"
+		}
+		contentNum := len(objects) + 2 // page object first, then its content
+		pageNum := add(fmt.Sprintf(
+			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] /Contents %d 0 R /Resources << %s >> >>",
+			testPageWidth, testPageHeight, contentNum, resources))
+		add(fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", content.Len(), content.String()))
+		pageRefs = append(pageRefs, fmt.Sprintf("%d 0 R", pageNum))
 	}
 	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>",
 		strings.Join(pageRefs, " "), len(pages))
@@ -71,6 +94,24 @@ func pdfWithPages(pages [][]textRun) []byte {
 	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF",
 		len(objects)+1, xref)
 	return []byte(b.String())
+}
+
+// imageXObject is a 2x2 uncompressed RGB image — the smallest thing PDFium
+// still counts as a raster image object.
+func imageXObject() string {
+	pixels := "\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\x00"
+	return fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "+
+		"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\nstream\n%s\nendstream",
+		len(pixels), pixels)
+}
+
+// pdfWithPages builds a text-only multi-page PDF.
+func pdfWithPages(pages [][]textRun) []byte {
+	specs := make([]pdfPage, 0, len(pages))
+	for _, runs := range pages {
+		specs = append(specs, pdfPage{Runs: runs})
+	}
+	return pdfWithPageSpecs(specs)
 }
 
 // pdfWithRuns builds a single-page PDF.

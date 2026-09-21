@@ -33,6 +33,7 @@ actually need.
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
 | Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
 | Encrypted PDFs, page ranges (`ReadOptions`) | PDFium | ✅ |
+| Complexity routing (`Inspect`, `is-complex`) | PDFium | ✅ |
 | Concurrent batch parsing | — | ✅ |
 | CLI (`go install`) | — | ✅ |
 | `ExtractText` whole-page text fast path | PDFium | ✅ |
@@ -51,9 +52,10 @@ As a command:
 ```bash
 go install github.com/promptrails/parserails/cmd/parserails@latest
 
-parserails parse  invoice.pdf          # extract text
-parserails parse  --json report.docx   # JSON, office docs via LibreOffice
-parserails render --dpi 150 doc.pdf    # render page 0 → doc-p0.png
+parserails parse      invoice.pdf      # extract text
+parserails parse      --json report.docx # JSON, office docs via LibreOffice
+parserails render     --dpi 150 doc.pdf  # render page 0 → doc-p0.png
+parserails is-complex scan.pdf           # which pages need OCR?
 ```
 
 No system dependencies for PDF. PDFium ships as a WASM module loaded at runtime
