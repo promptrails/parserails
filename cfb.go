@@ -95,9 +95,16 @@ func (f *cfbFile) sector(id uint32) []byte {
 	return f.data[start : start+f.sectorSize]
 }
 
+// sectorCount is how many sectors the file can actually hold. Header fields
+// are untrusted: every count and size is checked against it before it becomes
+// an allocation.
+func (f *cfbFile) sectorCount() int { return len(f.data) / f.sectorSize }
+
 // readFAT assembles the sector allocation table from the DIFAT.
 func (f *cfbFile) readFAT() error {
-	fatCount := binary.LittleEndian.Uint32(f.data[44:48])
+	// A file cannot hold more FAT sectors than it holds sectors; a header
+	// claiming four billion of them is a 16 GiB allocation, not a document.
+	fatCount := min(int64(binary.LittleEndian.Uint32(f.data[44:48])), int64(f.sectorCount()))
 	difat := make([]uint32, 0, fatCount)
 	for i := 0; i < 109; i++ {
 		off := 76 + i*4
@@ -108,9 +115,16 @@ func (f *cfbFile) readFAT() error {
 		difat = append(difat, id)
 	}
 	// Files with more than 109 FAT sectors continue the DIFAT in its own
-	// chain, each sector holding entries plus a pointer to the next.
+	// chain, each sector holding entries plus a pointer to the next. The
+	// chain is followed with a visited set: a sector whose "next" points at
+	// itself would otherwise grow the table forever out of a 4 KiB file.
 	next := binary.LittleEndian.Uint32(f.data[68:72])
-	for hops := 0; next < cfbEndOfChain && hops < cfbMaxSectorHops; hops++ {
+	seen := make(map[uint32]bool)
+	for hops := 0; next < cfbEndOfChain && hops < f.sectorCount()+1; hops++ {
+		if seen[next] {
+			break
+		}
+		seen[next] = true
 		sec := f.sector(next)
 		if sec == nil {
 			break
@@ -203,9 +217,16 @@ func (f *cfbFile) chainSectors(start uint32) [][]byte {
 	return out
 }
 
+// boundedSize caps a size taken from the file against the file itself: no
+// stream inside a container can be larger than the container. Without it a
+// forged directory entry (UINT64_MAX) panics the process in make().
+func (f *cfbFile) boundedSize(size uint64) uint64 {
+	return min(size, uint64(len(f.data)))
+}
+
 // readChain reads size bytes starting at a sector, following the FAT.
 func (f *cfbFile) readChain(start uint32, size uint64) []byte {
-	out := make([]byte, 0, size)
+	out := make([]byte, 0, f.boundedSize(size))
 	for _, sec := range f.chainSectors(start) {
 		out = append(out, sec...)
 		if uint64(len(out)) >= size {
@@ -228,7 +249,7 @@ func (f *cfbFile) readStream(e cfbEntry) []byte {
 		return f.readChain(e.Start, e.Size)
 	}
 
-	out := make([]byte, 0, e.Size)
+	out := make([]byte, 0, f.boundedSize(e.Size))
 	seen := make(map[uint32]bool)
 	for id := e.Start; id < cfbEndOfChain && uint64(len(out)) < e.Size; {
 		if seen[id] {
