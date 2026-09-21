@@ -94,20 +94,18 @@ func markdownTable(block Block) string {
 		header = make([]Cell, width)
 	}
 
-	var b strings.Builder
-	writeRow(&b, header, width)
-	b.WriteString("|")
-	for i := 0; i < width; i++ {
-		b.WriteString(" --- |")
-	}
+	// Built as lines and joined: a stray blank line between two rows ends the
+	// table, so every renderer would drop everything after the first one.
+	lines := make([]string, 0, len(rows)+2)
+	lines = append(lines, renderRow(header, width), separatorRow(width))
 	for _, row := range rows {
-		b.WriteString("\n")
-		writeRow(&b, row, width)
+		lines = append(lines, renderRow(row, width))
 	}
-	return b.String()
+	return strings.Join(lines, "\n")
 }
 
-func writeRow(b *strings.Builder, row []Cell, width int) {
+func renderRow(row []Cell, width int) string {
+	var b strings.Builder
 	b.WriteString("|")
 	for i := 0; i < width; i++ {
 		text := ""
@@ -116,7 +114,16 @@ func writeRow(b *strings.Builder, row []Cell, width int) {
 		}
 		b.WriteString(" " + text + " |")
 	}
-	b.WriteString("\n")
+	return b.String()
+}
+
+func separatorRow(width int) string {
+	var b strings.Builder
+	b.WriteString("|")
+	for i := 0; i < width; i++ {
+		b.WriteString(" --- |")
+	}
+	return b.String()
 }
 
 // escapeCell makes a cell safe for a pipe table: a literal pipe would end the

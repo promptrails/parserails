@@ -110,6 +110,23 @@ func TestMarkdownRendersStructure(t *testing.T) {
 	}
 }
 
+func TestMarkdownTableIsOneUnbrokenBlock(t *testing.T) {
+	md := markdownTable(Block{
+		Header: []Cell{{Text: "Region"}, {Text: "Revenue"}},
+		Rows: [][]Cell{
+			{{Text: "EMEA"}, {Text: "1.2M"}},
+			{{Text: "APAC"}, {Text: "0.8M"}},
+			{{Text: "AMER"}, {Text: "2.1M"}},
+		},
+	})
+	if strings.Contains(md, "\n\n") {
+		t.Fatalf("a blank line ends the table early:\n%q", md)
+	}
+	if lines := strings.Split(md, "\n"); len(lines) != 5 {
+		t.Fatalf("got %d lines, want header + separator + three rows:\n%s", len(lines), md)
+	}
+}
+
 func TestBlocksDropsRunningHeadersAndFooters(t *testing.T) {
 	p := newTestParser(t, WithFontInfo())
 	var pages [][]textRun
