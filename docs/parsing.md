@@ -84,3 +84,38 @@ for _, pg := range doc.Pages {
 		pg.Index, pg.Width, pg.Height, len(pg.Words))
 }
 ```
+
+## Lines and reading order
+
+PDFium reports characters and rectangles — nothing in the stream says where a
+line ends. ParseRails reconstructs lines from the geometry: words are sorted by
+their top edge, then grouped while they share enough of a vertical band, then
+ordered left to right.
+
+```go
+for _, l := range doc.Lines() {
+	fmt.Printf("p%d %q  [%.0f %.0f %.0f %.0f]\n", l.Page, l.Text(), l.X0, l.Y0, l.X1, l.Y1)
+}
+```
+
+| Method | Returns |
+|--------|---------|
+| `doc.Lines()` | every page's lines, in page order |
+| `page.Lines()` | one page's lines |
+| `line.Text()` | the line's words joined with single spaces |
+| `line.Height()` | the line's vertical extent in points |
+| `line.FontSize()` | the line's dominant font size (0 without `WithFontInfo`) |
+
+## Plain text output
+
+`Document.Text()` is built on those lines: lines are joined with `\n` and pages
+separated by a form feed (`\f`).
+
+```go
+text := doc.Text() // "First line\nSecond line\fPage two"
+```
+
+Reading order is top-to-bottom, then left-to-right, across the **whole page
+width**. A two-column page therefore reads line by line across both columns —
+use [Markdown output](markdown.md) when column structure matters, or
+`ExtractText` when you want PDFium's own text order without any reconstruction.

@@ -1,5 +1,7 @@
 package parserails
 
+import "strings"
+
 // Word is a single extracted token with its spatial bounding box.
 //
 // Coordinates are in PDF user space (origin at the bottom-left of the page),
@@ -39,16 +41,20 @@ func (d *Document) Words() []Word {
 	return out
 }
 
-// Text concatenates all words across all pages, space-separated.
+// Text returns the document's text with its line structure reconstructed:
+// words are grouped into lines by geometry, lines are joined with newlines, and
+// pages are separated by a form feed ("\f").
+//
+// Reading order is top-to-bottom, then left-to-right. Multi-column pages are
+// read line-by-line across the whole page width; use Blocks or Markdown when
+// column structure matters.
 func (d *Document) Text() string {
-	var b []byte
+	var b strings.Builder
 	for i := range d.Pages {
-		for j := range d.Pages[i].Words {
-			if len(b) > 0 {
-				b = append(b, ' ')
-			}
-			b = append(b, d.Pages[i].Words[j].Text...)
+		if i > 0 {
+			b.WriteByte('\f')
 		}
+		b.WriteString(d.Pages[i].Text())
 	}
-	return string(b)
+	return b.String()
 }
