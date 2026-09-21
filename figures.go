@@ -90,16 +90,17 @@ func (p *Parser) ocrRegion(ctx context.Context, raster *image.RGBA, region Image
 }
 
 // pixelRect maps a region in PDF user space onto the rendered raster's pixel
-// grid (top-left origin).
+// grid (top-left origin). ratio is pixels per point, so points are multiplied
+// by it — see pixelsToPoints.
 func pixelRect(r ImageRegion, ratio, pageHeight float64) image.Rectangle {
 	if ratio <= 0 {
 		return image.Rectangle{}
 	}
 	return image.Rect(
-		int(r.X0/ratio),
-		int((pageHeight-r.Y1)/ratio),
-		int(r.X1/ratio+1),
-		int((pageHeight-r.Y0)/ratio+1),
+		int(r.X0*ratio),
+		int((pageHeight-r.Y1)*ratio),
+		int(r.X1*ratio)+1,
+		int((pageHeight-r.Y0)*ratio)+1,
 	)
 }
 

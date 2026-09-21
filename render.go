@@ -68,7 +68,7 @@ func (p *Parser) renderPage(ctx context.Context, data []byte, req RenderRequest)
 
 // renderInstance renders a page on an already-acquired instance. The returned
 // cleanup MUST be called once the image is no longer needed (it frees the
-// WASM-side buffer). ratio is the point-to-pixel ratio (points per pixel).
+// WASM-side buffer). ratio is PDFium's PointToPixelRatio: pixels per point.
 func renderInstance(inst pdfium.Pdfium, page requests.Page, dpi int) (img *image.RGBA, ratio float64, cleanup func(), err error) {
 	res, err := inst.RenderPageInDPI(&requests.RenderPageInDPI{Page: page, DPI: dpi})
 	if err != nil {
@@ -113,16 +113,27 @@ func (p *Parser) ocrPage(ctx context.Context, inst pdfium.Pdfium, page requests.
 	return pixelsToPoints(words, ratio, size.Height), nil
 }
 
-// pixelsToPoints converts top-left pixel-space boxes into bottom-left PDF points.
+// pixelsToPoints converts top-left pixel-space boxes into bottom-left PDF
+// points.
+//
+// ratio is PDFium's PointToPixelRatio, which despite its name (and go-pdfium's
+// comment) is dpi/72 — **pixels per point**, as its own definition shows:
+// (widthInPoints * dpi/72) / widthInPoints. Pixels are therefore divided by it,
+// not multiplied: at 200 DPI a 612×792pt page renders to 1700×2200px with
+// ratio 2.78, and multiplying would put every OCR word several pages away from
+// where it was read.
 func pixelsToPoints(words []Word, ratio, pageHeightPts float64) []Word {
+	if ratio <= 0 {
+		return words
+	}
 	for i := range words {
 		w := &words[i]
-		left, right := w.X0*ratio, w.X1*ratio
+		left, right := w.X0/ratio, w.X1/ratio
 		topPx, bottomPx := w.Y0, w.Y1
 		w.X0, w.X1 = left, right
-		w.Y1 = pageHeightPts - topPx*ratio    // top edge → higher Y
-		w.Y0 = pageHeightPts - bottomPx*ratio // bottom edge → lower Y
-		w.FontSize *= ratio
+		w.Y1 = pageHeightPts - topPx/ratio    // top edge → higher Y
+		w.Y0 = pageHeightPts - bottomPx/ratio // bottom edge → lower Y
+		w.FontSize /= ratio
 	}
 	return words
 }

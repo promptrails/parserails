@@ -114,17 +114,59 @@ func TestMergeWordsDropsDuplicatesOfNativeText(t *testing.T) {
 }
 
 func TestPixelRectFlipsTheYAxis(t *testing.T) {
-	// 200 DPI on a 792pt-high page: 0.36 points per pixel.
-	ratio := 0.36
+	// PDFium's ratio is pixels per point: 200 DPI is 200/72 = 2.78.
+	ratio := 200.0 / 72.0
 	r := pixelRect(ImageRegion{X0: 72, Y0: 300, X1: 472, Y1: 600}, ratio, 792)
-	if r.Min.X != 200 {
+	if r.Min.X != 200 { // 72pt = one inch = 200px at 200 DPI
 		t.Errorf("left = %d, want 200", r.Min.X)
 	}
 	// The top of the region (Y1=600) is 192 points below the page top.
-	if want := int(192 / ratio); r.Min.Y != want {
+	if want := int(192 * ratio); r.Min.Y != want {
 		t.Errorf("top = %d, want %d", r.Min.Y, want)
 	}
 	if r.Dy() <= 0 || r.Dx() <= 0 {
 		t.Errorf("degenerate rect %v", r)
+	}
+}
+
+func TestPixelsToPointsUsesPixelsPerPoint(t *testing.T) {
+	// One inch in from the left and down from the top, at 200 DPI.
+	ratio := 200.0 / 72.0
+	got := pixelsToPoints([]Word{{X0: 200, Y0: 200, X1: 400, Y1: 240}}, ratio, 792)[0]
+	if got.X0 != 72 {
+		t.Errorf("X0 = %v, want 72pt", got.X0)
+	}
+	if got.Y1 != 792-72 {
+		t.Errorf("Y1 = %v, want %v", got.Y1, 792-72.0)
+	}
+	if got.X1 != 144 {
+		t.Errorf("X1 = %v, want 144pt", got.X1)
+	}
+}
+
+// A word recognized in the middle of a rendered page must come back in the
+// middle of the page, not several pages away.
+func TestWholePageOCRLandsOnThePage(t *testing.T) {
+	ocr := &fakeOCR{words: []Word{{Text: "CENTRE", X0: 840, Y0: 1090, X1: 860, Y1: 1110}}}
+	p := newTestParser(t, WithOCR(ocr))
+
+	doc, err := p.Parse(context.Background(), pdfWithPageSpecs([]pdfPage{{}}))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.Pages[0].Words) != 1 {
+		t.Fatalf("words = %+v", doc.Pages[0].Words)
+	}
+	w := doc.Pages[0].Words[0]
+	page := doc.Pages[0]
+	if w.X0 < 0 || w.X1 > page.Width || w.Y0 < 0 || w.Y1 > page.Height {
+		t.Fatalf("word %+v is outside the %.0fx%.0f page", w, page.Width, page.Height)
+	}
+	// The raster centre at 200 DPI (1700x2200) is the page centre.
+	if diff := w.X0 - page.Width/2; diff > 12 || diff < -12 {
+		t.Errorf("X0 = %.1f, want near the page centre %.1f", w.X0, page.Width/2)
+	}
+	if diff := w.Y0 - page.Height/2; diff > 12 || diff < -12 {
+		t.Errorf("Y0 = %.1f, want near the page centre %.1f", w.Y0, page.Height/2)
 	}
 }
