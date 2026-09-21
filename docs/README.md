@@ -28,6 +28,9 @@ for _, w := range doc.Words() {
 | **Same engine as the big tools** | Google's PDFium, the engine behind Chrome's PDF viewer |
 | **Pluggable OCR** | Fall back to Tesseract or a remote OCR server for scanned pages |
 | **Pooled** | A reusable, concurrency-safe runtime pool — one `Parser` per process |
+| **Structured** | [Markdown and blocks](markdown.md) reconstructed from the geometry: headings, tables, lists |
+| **Routing** | [`Inspect`](complexity.md) says which pages need OCR before you pay for it |
+| **Recursive** | [Containers](containers.md): archives, e-mails, attachments, embedded objects |
 
 ParseRails is the Go counterpart to [run-llama/liteparse](https://github.com/run-llama/liteparse).
 

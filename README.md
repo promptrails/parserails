@@ -1,7 +1,8 @@
 # ParseRails
 
-Fast, light, **cgo-free** document parsing for Go. Spatial text extraction with
-bounding boxes, page screenshots, and pluggable OCR — no cloud, no LLM required.
+Fast, light, **cgo-free** document parsing for Go. Spatial text with bounding
+boxes, Markdown reconstruction, page screenshots, OCR routing and recursive
+extraction of files inside files — no cloud, no LLM required.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/promptrails/parserails.svg)](https://pkg.go.dev/github.com/promptrails/parserails)
 [![CI](https://github.com/promptrails/parserails/actions/workflows/ci.yml/badge.svg)](https://github.com/promptrails/parserails/actions/workflows/ci.yml)
@@ -18,7 +19,15 @@ libraries to install in your Docker image, and clean cross-compilation.
 Most Go PDF text extractors give you a flat string and lose layout. ParseRails
 keeps **spatial structure** — every word with its bounding box, page, and font —
 which is what downstream RAG, table reconstruction, and LLM-vision pipelines
-actually need.
+actually need. On top of that it reconstructs the structure those pipelines
+read: headings, tables and lists as [Markdown](./docs/markdown.md).
+
+It also handles what arrives around the document. Real input is a scan, or a
+`.docx` with a spreadsheet pasted into it, or an invoice attached to an e-mail
+inside a ZIP — so ParseRails [detects formats from their
+bytes](./docs/formats.md), [walks files inside
+files](./docs/containers.md), and [says which pages need OCR](./docs/complexity.md)
+before you pay for it.
 
 ## Features
 
@@ -116,6 +125,7 @@ type Word struct {
 	Page           int
 	X0, Y0, X1, Y1 float64 // bounding box, PDF user-space coordinates
 	FontSize       float64 // 0 unless New(WithFontInfo()) is used
+	Confidence     float64 // OCR score, 0-1; 0 for natively extracted text
 }
 ```
 
@@ -127,6 +137,48 @@ boundary. For per-line boxes at ~6× the speed:
 ```go
 p, _ := parserails.New(parserails.WithGranularity(parserails.GranularityLine))
 ```
+
+## Markdown & blocks
+
+Structure, reconstructed from the geometry — headings, tables, lists, figures,
+in reading order:
+
+```go
+md := doc.Markdown()
+
+for _, b := range doc.Blocks() {
+	fmt.Printf("%-10s p%d %q\n", b.Kind, b.Page, b.Text)
+}
+```
+
+Every block carries the box it came from, so a heading or a single table cell
+maps back to the region of the page it was read from. See
+[docs/markdown.md](./docs/markdown.md).
+
+## Does it need OCR?
+
+```go
+c, _ := p.Inspect(ctx, data, parserails.ReadOptions{})
+if c.NeedsOCR() {
+	fmt.Println("pages needing OCR:", c.OCRPages()) // reasons: scanned, garbled, ...
+}
+```
+
+A text-layer pass — nothing is rendered, no OCR runs — so a pipeline can route
+or price a batch for a fraction of a parse. See
+[docs/complexity.md](./docs/complexity.md).
+
+## Files inside files
+
+```go
+node, _ := p.ExtractFile(ctx, "bundle.zip", parserails.ExtractOptions{})
+fmt.Println(node.AllText())
+```
+
+PDF attachments, ZIP entries, e-mail and Outlook attachments, OLE objects
+embedded in office documents — recursively, bounded by depth, file count and
+unpacked bytes. One unreadable file is recorded on its own node instead of
+failing the walk. See [docs/containers.md](./docs/containers.md).
 
 ## OCR (pluggable)
 
@@ -142,8 +194,14 @@ p, _ := parserails.New(
 ```
 
 The bundled `ocr/tesseract` adapter shells out to the `tesseract` binary (no cgo,
-no `libtesseract`). Implement the one-method `OCR` interface for any other engine
-or a remote service. An HTTP adapter is on the roadmap.
+no `libtesseract`), and `ocr/httpocr` talks to a remote server over the
+**LiteParse OCR API**, so the OCR server images published for LiteParse
+(EasyOCR, PaddleOCR, RapidOCR, Surya) work unchanged. Implement the one-method
+`OCR` interface for anything else.
+
+`WithImageOCR` goes further than the fallback: it also reads the figures on
+pages that *do* have text — charts, pasted screenshots — and merges the result
+with the native words.
 
 ## Screenshots
 
@@ -231,11 +289,17 @@ See [docs/examples.md](./docs/examples.md).
 
 ## Status
 
-The PDF core and the full liteparse-style feature set (spatial text, rendering,
-OCR, office formats, CLI, batch) are implemented, with both a cgo-free WASM
-backend and a native `parserails_cgo` backend. See
-[`docs/roadmap.md`](./docs/roadmap.md) for the detailed status and what's still
-being considered (e.g. native XLSX cell extraction without LibreOffice).
+The PDF core is complete — spatial text, rendering, OCR, office formats, CLI,
+batch — with both a cgo-free WASM backend and a native `parserails_cgo`
+backend. Around it sit the layers a real pipeline needs: format detection,
+[Markdown and block reconstruction](./docs/markdown.md), [OCR
+routing](./docs/complexity.md), [recursive container
+extraction](./docs/containers.md) and [native office
+reading](./docs/office.md).
+
+See [`docs/roadmap.md`](./docs/roadmap.md) for the detailed status and what is
+still being considered (ruled-table detection from vector graphics, layout
+complexity signals, published quality benchmark numbers).
 
 ## License
 
