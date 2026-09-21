@@ -53,24 +53,46 @@ tesseract.New(tesseract.Config{
 
 ## The HTTP backend
 
-`ocr/httpocr` delegates to a remote OCR server (EasyOCR/PaddleOCR-style). It POSTs
-the page as PNG and decodes a JSON response of pixel-space words:
+`ocr/httpocr` delegates to a remote OCR server. It speaks the **LiteParse OCR
+API** by default, so the OCR server images published for LiteParse — EasyOCR,
+PaddleOCR, RapidOCR, Surya — work with ParseRails unchanged.
 
 ```go
 import "github.com/promptrails/parserails/ocr/httpocr"
 
 p, _ := parserails.New(parserails.WithOCR(httpocr.New(httpocr.Config{
-	URL:    "https://ocr.internal/recognize",
-	Header: http.Header{"Authorization": {"Bearer " + token}},
+	URL:      "http://localhost:8080/ocr",
+	Language: "tur", // sent as the `language` field; defaults to "en"
+	Header:   http.Header{"Authorization": {"Bearer " + token}},
 })))
 ```
 
-Server contract:
+Server contract (`ProtocolOCRAPI`, the default):
+
+```
+POST <URL>   multipart/form-data: file=<page.png>, language=<code>
+200 OK       {"results":[{"text":"hi","bbox":[x1,y1,x2,y2],"confidence":0.95}]}
+```
+
+`bbox` is `[x1, y1, x2, y2]` in image pixels with a top-left origin, and
+`confidence` is 0–1, landing in `Word.Confidence`. A result that carries only a
+detection `polygon` (rotated or vertical text) is reduced to its axis-aligned
+bounds.
+
+ParseRails' original protocol is still available for servers written against
+it:
+
+```go
+httpocr.New(httpocr.Config{URL: url, Protocol: httpocr.ProtocolWords})
+```
 
 ```
 POST <URL>   body: image/png
-200 OK       body: {"words":[{"text":"hi","x0":1,"y0":2,"x1":3,"y1":4}]}
+200 OK       {"words":[{"text":"hi","x0":1,"y0":2,"x1":3,"y1":4,"confidence":0.9}]}
 ```
+
+Responses are decoded leniently: whichever of `results` or `words` the server
+sends is accepted, whatever protocol was configured.
 
 ## Writing your own
 

@@ -29,7 +29,7 @@ actually need.
 | Page screenshot rendering (`RenderPage`) | PDFium (WASM) | ✅ |
 | Pluggable OCR + automatic fallback | interface | ✅ |
 | Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
-| HTTP OCR adapter (remote OCR servers) | `net/http` | ✅ |
+| HTTP OCR adapter (LiteParse OCR API compatible) | `net/http` | ✅ |
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |
 | Magic-byte format detection (`Sniff`/`Detect`) | — | ✅ |
 | Encrypted PDFs, page ranges (`ReadOptions`) | PDFium | ✅ |
