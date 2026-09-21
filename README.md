@@ -28,6 +28,7 @@ actually need.
 | Word / line granularity, opt-in font size | PDFium (WASM) | ✅ |
 | Page screenshot rendering (`RenderPage`) | PDFium (WASM) | ✅ |
 | Pluggable OCR + automatic fallback | interface | ✅ |
+| Figure OCR on text pages, merged with native words | interface | ✅ |
 | Tesseract OCR adapter (cgo-free, subprocess) | `tesseract` CLI | ✅ |
 | HTTP OCR adapter (LiteParse OCR API compatible) | `net/http` | ✅ |
 | Office formats (DOCX/PPTX/XLSX/...) | LibreOffice headless → PDF | ✅ |

@@ -42,6 +42,7 @@ type Parser struct {
 	sofficeBin  string
 	password    string
 	maxPages    int
+	imageOCR    bool
 }
 
 // Option configures a Parser.
@@ -55,6 +56,7 @@ type config struct {
 	sofficeBin                 string
 	password                   string
 	maxPages                   int
+	imageOCR                   bool
 }
 
 // WithOCR sets the OCR backend used as a fallback for pages with no extractable
@@ -78,6 +80,14 @@ func WithPoolSize(minIdle, maxIdle, maxTotal int) Option {
 // office documents (DOCX/PPTX/XLSX/...) to PDF. By default ParseRails looks for
 // the PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
 func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin = path } }
+
+// WithImageOCR also recognizes the text inside raster figures on pages that do
+// have a text layer, merging it with the native words. Without it, OCR only
+// runs on pages with no extractable text at all.
+//
+// It costs one page render plus one OCR call per substantial figure, so it is
+// off by default; it needs an OCR backend (WithOCR) to do anything.
+func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
 
 // WithPassword sets the default password used to open encrypted documents. It
 // can be overridden per read with ReadOptions.Password.
@@ -107,6 +117,7 @@ func New(opts ...Option) (*Parser, error) {
 		sofficeBin:  cfg.sofficeBin,
 		password:    cfg.password,
 		maxPages:    cfg.maxPages,
+		imageOCR:    cfg.imageOCR,
 	}, nil
 }
 
@@ -213,15 +224,30 @@ func (p *Parser) parsePage(ctx context.Context, inst pdfium.Pdfium, docRef refer
 		page.Words = wordsFromChars(text.Chars, index)
 	}
 
-	// Scanned/image-only page: no extractable text. Fall back to OCR if set.
-	if len(page.Words) == 0 {
-		ocrWords, err := p.ocrPage(ctx, inst, pageReq, pageSize{Width: size.Width, Height: size.Height})
+	dims := pageSize{Width: size.Width, Height: size.Height}
+	switch {
+	case len(page.Words) == 0:
+		// Scanned/image-only page: no extractable text. Fall back to OCR.
+		ocrWords, err := p.ocrPage(ctx, inst, pageReq, dims)
 		if err != nil {
 			return Page{}, err
 		}
 		page.Words = ocrWords
+	case p.imageOCR && p.hasOCR():
+		// Text page with figures: read what the pictures say too.
+		words, err := p.ocrFigures(ctx, inst, pageReq, dims, page.Words, index)
+		if err != nil {
+			return Page{}, err
+		}
+		page.Words = words
 	}
 	return page, nil
+}
+
+// hasOCR reports whether a real OCR backend is configured.
+func (p *Parser) hasOCR() bool {
+	_, none := p.ocr.(noOCR)
+	return !none
 }
 
 // wordsFromChars groups characters into words split on whitespace; each word's

@@ -94,6 +94,33 @@ POST <URL>   body: image/png
 Responses are decoded leniently: whichever of `results` or `words` the server
 sends is accepted, whatever protocol was configured.
 
+## Figures on text pages
+
+By default OCR is a **fallback**: it runs only on pages with no extractable
+text at all. That misses the common middle case — a report whose text layer is
+fine but whose numbers live inside a pasted screenshot or a chart.
+
+`WithImageOCR` reads those too:
+
+```go
+p, _ := parserails.New(
+	parserails.WithOCR(tesseract.New(tesseract.Config{})),
+	parserails.WithImageOCR(),
+)
+```
+
+On a page that already has text, every raster figure larger than 24 points a
+side and 2% of the page is rendered and recognized, and the result is **merged**
+with the native words. Recognized words that land on top of text the document
+already spells out are dropped — native text is exact, OCR of the same glyphs
+is a guess with a worse box.
+
+The cost scales with the pictures, not the page count: one page render plus one
+OCR call per substantial figure. It is off by default for that reason.
+
+Pair it with [`Inspect`](complexity.md), which tells you up front which pages
+carry figures worth reading (`embedded-images`).
+
 ## Writing your own
 
 Anything that turns an image into positioned words works — a different engine, a
