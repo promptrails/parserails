@@ -3,6 +3,8 @@ package parserails
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -79,6 +81,38 @@ func TestInspectImageIsAlwaysAScan(t *testing.T) {
 	if !c.NeedsOCR() || !contains(c.Pages[0].Reasons, ReasonScanned) {
 		t.Fatalf("complexity = %+v, want a scanned verdict", c.Pages)
 	}
+}
+
+func TestParseImageRejectsOversizedHeaders(t *testing.T) {
+	ocr := &fakeOCR{}
+	p := newTestParser(t, WithOCR(ocr))
+
+	// A valid PNG header declaring 60000x60000 with no pixel data behind it:
+	// decoding it would reserve gigabytes before failing.
+	_, err := p.ParseImage(context.Background(), pngHeader(60000, 60000))
+	if err == nil || !strings.Contains(err.Error(), "megapixel limit") {
+		t.Fatalf("err = %v, want a size-limit refusal", err)
+	}
+	if len(ocr.crops) != 0 {
+		t.Error("OCR should not have run")
+	}
+}
+
+// pngHeader builds a PNG signature plus a valid IHDR for the given size, and
+// nothing else.
+func pngHeader(width, height uint32) []byte {
+	var ihdr bytes.Buffer
+	ihdr.WriteString("IHDR")
+	_ = binary.Write(&ihdr, binary.BigEndian, width)
+	_ = binary.Write(&ihdr, binary.BigEndian, height)
+	ihdr.Write([]byte{8, 2, 0, 0, 0}) // 8-bit truecolour
+
+	var out bytes.Buffer
+	out.WriteString("\x89PNG\r\n\x1a\n")
+	_ = binary.Write(&out, binary.BigEndian, uint32(ihdr.Len()-4)) // length excludes the type
+	out.Write(ihdr.Bytes())
+	_ = binary.Write(&out, binary.BigEndian, crc32.ChecksumIEEE(ihdr.Bytes()))
+	return out.Bytes()
 }
 
 func samplePNG(w, h int) []byte {

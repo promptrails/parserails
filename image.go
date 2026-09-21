@@ -14,6 +14,12 @@ import (
 	_ "golang.org/x/image/webp" // register the WebP decoder
 )
 
+// maxImagePixels caps how large a raster ParseRails will decode. Image headers
+// are untrusted input and decoders allocate from them: a hundred-byte PNG can
+// declare 60000x60000 and reserve fourteen gigabytes before failing on the
+// pixel data that was never there.
+const maxImagePixels = 100 << 20 // 100 megapixels — far past any real scan
+
 // ParseImage reads a standalone raster image — a scan, a photo of a receipt, a
 // screenshot — through the configured OCR backend.
 //
@@ -31,6 +37,17 @@ func (p *Parser) parseImage(ctx context.Context, data []byte) (*Document, error)
 	if !p.hasOCR() {
 		return nil, fmt.Errorf("parserails: reading an image needs an OCR backend (see WithOCR)")
 	}
+	// Read the header first and check the declared size against the budget,
+	// before any decoder allocates a pixel buffer from it.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("parserails: decode image header: %w", err)
+	}
+	if pixels := int64(cfg.Width) * int64(cfg.Height); pixels > maxImagePixels {
+		return nil, fmt.Errorf("parserails: image declares %dx%d (%d megapixels), over the %d megapixel limit",
+			cfg.Width, cfg.Height, pixels>>20, int64(maxImagePixels)>>20)
+	}
+
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("parserails: decode image: %w", err)
