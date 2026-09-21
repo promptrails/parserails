@@ -16,7 +16,7 @@ func TestCFBRejectsForgedStreamSize(t *testing.T) {
 	off := cfbHeaderSize + cfbTestSectorSize + cfbDirEntrySize + 120
 	binary.LittleEndian.PutUint64(data[off:off+8], ^uint64(0))
 
-	children, err := (oleContainer{}).Children(context.Background(), data)
+	children, err := (oleContainer{}).Children(context.Background(), data, ChildRequest{})
 	if err != nil {
 		t.Logf("error (acceptable): %v", err)
 	}

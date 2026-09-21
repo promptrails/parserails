@@ -91,6 +91,49 @@ func TestExtractStopsOnRepeatedContent(t *testing.T) {
 	}
 }
 
+func TestExtractStopsUnpackingAtTheByteBudget(t *testing.T) {
+	p := newTestParser(t)
+	// Six entries of 4 MiB of zeros each: tiny compressed, 24 MiB unpacked.
+	files := map[string][]byte{}
+	for i := 0; i < 6; i++ {
+		files[fmt.Sprintf("big-%d.bin", i)] = make([]byte, 4<<20)
+	}
+	node, err := p.Extract(context.Background(), zipArchive(files), ExtractOptions{MaxBytes: 5 << 20})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	var taken, refused int
+	for _, c := range node.Children {
+		if c.Err != nil {
+			refused++
+			continue
+		}
+		taken++
+	}
+	if refused == 0 {
+		t.Fatalf("no entry was refused under a 5 MiB budget: %s", treeSummary(node))
+	}
+	if taken > 2 {
+		t.Errorf("unpacked %d entries of 4 MiB under a 5 MiB budget", taken)
+	}
+}
+
+func TestExtractForwardsThePasswordToAttachments(t *testing.T) {
+	p := newTestParser(t)
+	node, err := p.Extract(context.Background(), encryptedPDF("Secret Report", "hunter2"),
+		ExtractOptions{ReadOptions: ReadOptions{Name: "sealed.pdf", Password: "hunter2"}})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if node.Err != nil {
+		t.Fatalf("node error = %v, want none: the password was given", node.Err)
+	}
+	if node.Document == nil || node.Document.Text() != "Secret Report" {
+		t.Fatalf("document = %+v", node.Document)
+	}
+}
+
 func TestExtractLimitsFileCount(t *testing.T) {
 	p := newTestParser(t)
 	files := map[string][]byte{}
@@ -101,14 +144,20 @@ func TestExtractLimitsFileCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	var stopped int
+	var stopped, taken int
 	node.Walk(func(n *Node) {
-		if n.Err != nil && strings.Contains(n.Err.Error(), "more than 3 files") {
+		switch {
+		case n.Err != nil && strings.Contains(n.Err.Error(), "extraction stopped"):
 			stopped++
+		case n.Text != "":
+			taken++
 		}
 	})
 	if stopped == 0 {
 		t.Fatalf("file limit never fired: %s", treeSummary(node))
+	}
+	if taken > 3 {
+		t.Errorf("opened %d files under a limit of 3: %s", taken, treeSummary(node))
 	}
 }
 

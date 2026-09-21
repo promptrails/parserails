@@ -26,7 +26,7 @@ const (
 // msgContainer yields an Outlook message's attachments.
 type msgContainer struct{}
 
-func (msgContainer) Children(_ context.Context, data []byte) ([]Child, error) {
+func (msgContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
 	f, err := openCFB(data)
 	if err != nil {
 		return nil, err

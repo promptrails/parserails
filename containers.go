@@ -21,8 +21,8 @@ const maxChildBytes = 128 << 20
 // zipContainer yields every file in a ZIP archive.
 type zipContainer struct{}
 
-func (zipContainer) Children(_ context.Context, data []byte) ([]Child, error) {
-	return zipEntries(data, func(string) bool { return true })
+func (zipContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
+	return zipEntries(data, req, func(string) bool { return true })
 }
 
 // ooxmlContainer yields the files embedded in an Office Open XML package.
@@ -32,55 +32,90 @@ func (zipContainer) Children(_ context.Context, data []byte) ([]Child, error) {
 // attached objects — a spreadsheet pasted into a report, an attached PDF.
 type ooxmlContainer struct{}
 
-func (ooxmlContainer) Children(_ context.Context, data []byte) ([]Child, error) {
-	return zipEntries(data, func(name string) bool {
+func (ooxmlContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
+	return zipEntries(data, req, func(name string) bool {
 		return strings.Contains(strings.ToLower(name), "/embeddings/")
 	})
 }
 
-func zipEntries(data []byte, keep func(string) bool) ([]Child, error) {
+// zipEntries unpacks the entries a filter keeps, within the walk's remaining
+// budget.
+//
+// The budget is spent here, as each entry is decompressed, rather than counted
+// afterwards: an archive of a thousand entries that each expand to 64 MiB is
+// 64 GiB of allocation before a caller that only checks totals ever sees the
+// first one.
+func zipEntries(data []byte, req ChildRequest, keep func(string) bool) ([]Child, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("parserails: read zip: %w", err)
 	}
+
+	remaining := req.MaxBytes
 	var out []Child
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() || !keep(f.Name) {
 			continue
 		}
-		if f.UncompressedSize64 > maxChildBytes {
-			out = append(out, Child{Name: f.Name})
+		if req.MaxFiles > 0 && len(out) >= req.MaxFiles {
+			out = append(out, Child{Name: f.Name,
+				Err: fmt.Errorf("parserails: extraction stopped: more files than the limit allows")})
+			break
+		}
+
+		limit := int64(maxChildBytes)
+		if remaining > 0 && remaining < limit {
+			limit = remaining
+		}
+		body, err := readZipFile(f, limit)
+		switch {
+		case err != nil:
+			// A broken entry is not a broken archive.
+			out = append(out, Child{Name: f.Name, Err: fmt.Errorf("parserails: read zip entry: %w", err)})
+			continue
+		case int64(len(body)) > limit:
+			out = append(out, Child{Name: f.Name,
+				Err: fmt.Errorf("parserails: entry is larger than the remaining %d byte budget", limit)})
 			continue
 		}
-		body, err := readZipFile(f)
-		if err != nil {
-			continue // a broken entry is not a broken archive
+		if remaining > 0 {
+			remaining -= int64(len(body))
 		}
 		out = append(out, Child{Name: f.Name, Data: body})
 	}
 	return out, nil
 }
 
-func readZipFile(f *zip.File) ([]byte, error) {
+// readZipFile decompresses one entry, reading one byte past the limit so the
+// caller can tell "exactly at the limit" from "over it". The declared
+// uncompressed size is not trusted: it is written by whoever built the archive.
+func readZipFile(f *zip.File, limit int64) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
-	return io.ReadAll(io.LimitReader(rc, maxChildBytes))
+	return io.ReadAll(io.LimitReader(rc, limit+1))
 }
 
 // pdfContainer yields a PDF's embedded file attachments.
 type pdfContainer struct{ parser *Parser }
 
-func (c pdfContainer) Children(_ context.Context, data []byte) ([]Child, error) {
+func (c pdfContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
 	inst, err := c.parser.pool.GetInstance(c.parser.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}
 	defer func() { _ = inst.Close() }()
 
-	doc, err := openDocument(inst, data, c.parser.password)
+	// The password the caller opened this read with, not just the parser's
+	// default: otherwise a document that parsed fine reports itself encrypted
+	// the moment its attachments are enumerated.
+	password := req.Password
+	if password == "" {
+		password = c.parser.password
+	}
+	doc, err := openDocument(inst, data, password)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +162,7 @@ func (c pdfContainer) Children(_ context.Context, data []byte) ([]Child, error) 
 // emlText.
 type emlContainer struct{}
 
-func (emlContainer) Children(_ context.Context, data []byte) ([]Child, error) {
+func (emlContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
 	msg, err := mail.ReadMessage(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("parserails: read e-mail: %w", err)
@@ -144,7 +179,7 @@ func (emlContainer) Children(_ context.Context, data []byte) ([]Child, error) {
 // their own right.
 type oleContainer struct{}
 
-func (oleContainer) Children(_ context.Context, data []byte) ([]Child, error) {
+func (oleContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
 	f, err := openCFB(data)
 	if err != nil {
 		return nil, err

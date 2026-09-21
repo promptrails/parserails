@@ -10,10 +10,29 @@ import (
 	"strings"
 )
 
-// Child is a file found inside another file.
+// Child is a file found inside another file. Err records a child that was
+// found but could not be taken — a corrupt archive entry, or one that would
+// blow the walk's remaining budget — so it is reported rather than silently
+// missing.
 type Child struct {
 	Name string
 	Data []byte
+	Err  error
+}
+
+// ChildRequest carries what a container needs besides the bytes: how to open
+// the containing file, and how much of the walk's budget is left.
+type ChildRequest struct {
+	// Name is the containing file's name, for error messages.
+	Name string
+	// Password opens an encrypted container (a PDF with attachments).
+	Password string
+	// MaxFiles and MaxBytes are what remains of the walk's budget. Zero means
+	// no limit. A container must not unpack more than this: the walker's own
+	// accounting happens after Children returns, which is too late to stop an
+	// archive from allocating.
+	MaxFiles int
+	MaxBytes int64
 }
 
 // Container yields the files embedded in a document.
@@ -23,8 +42,9 @@ type Child struct {
 // WithContainer.
 type Container interface {
 	// Children returns the files embedded directly in data. It does not
-	// recurse: ParseRails walks the tree itself, applying its own limits.
-	Children(ctx context.Context, data []byte) ([]Child, error)
+	// recurse: ParseRails walks the tree itself. It should stop within the
+	// budget in req, reporting what it skipped as a Child with an Err.
+	Children(ctx context.Context, data []byte, req ChildRequest) ([]Child, error)
 }
 
 // Node is one file in an extraction tree: the document itself, whatever text
@@ -198,12 +218,18 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int)
 	if !ok {
 		return node, nil
 	}
-	children, err := container.Children(ctx, data)
+	children, err := w.children(ctx, container, node, data)
 	if err != nil {
 		node.Err = err
 		return node, nil
 	}
 	for _, child := range children {
+		if child.Err != nil {
+			// Found but not taken: keep it in the tree with its reason.
+			node.Children = append(node.Children, &Node{Name: child.Name, Err: child.Err})
+			w.files++
+			continue
+		}
 		sub, err := w.visit(ctx, child.Name, child.Data, depth+1)
 		if err != nil {
 			return nil, err // only context cancellation gets here
@@ -211,6 +237,23 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int)
 		node.Children = append(node.Children, sub)
 	}
 	return node, nil
+}
+
+// children enumerates one node's embedded files, under the same timeout as
+// parsing: a container that reopens the document (PDF attachments) makes
+// PDFium calls of its own, which no context can interrupt.
+func (w *walker) children(ctx context.Context, container Container, node *Node, data []byte) ([]Child, error) {
+	req := ChildRequest{
+		Name:     node.Name,
+		Password: w.opt.Password,
+		MaxBytes: w.remaining,
+	}
+	if w.maxFiles > 0 {
+		req.MaxFiles = max(w.maxFiles-w.files, 0)
+	}
+	return bounded(ctx, w.parser, func(ctx context.Context) ([]Child, error) {
+		return container.Children(ctx, data, req)
+	})
 }
 
 // read fills in a node's own content, recording rather than returning errors.

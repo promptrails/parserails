@@ -70,6 +70,12 @@ enormously, and can contain themselves.
 | `MaxBytes` | 256 MiB | zip bombs |
 | — | always on | a file that contains itself: identical content is visited once, by hash |
 
+The byte budget is spent **as each entry is decompressed**, not counted after
+the fact — an archive of a thousand entries that each expand to 64 MiB would
+otherwise allocate 64 GiB before anything checked the total. An entry that
+would exceed what is left is reported as a node with an `Err`, so it is
+visible rather than silently missing.
+
 `SkipParse: true` collects the tree without parsing anything, which is much
 cheaper when you only want an inventory.
 
@@ -78,8 +84,13 @@ cheaper when you only want an inventory.
 ```go
 type tarContainer struct{}
 
-func (tarContainer) Children(ctx context.Context, data []byte) ([]parserails.Child, error) {
-	// ...one level only; ParseRails walks the tree and applies the limits
+func (tarContainer) Children(
+	ctx context.Context, data []byte, req parserails.ChildRequest,
+) ([]parserails.Child, error) {
+	// One level only: ParseRails walks the tree itself. Stay inside
+	// req.MaxFiles and req.MaxBytes — what is left of the walk's budget —
+	// and report what you skipped as a Child with an Err. req.Password is
+	// the password this read was opened with, for containers that need it.
 }
 
 p, _ := parserails.New(parserails.WithContainer(parserails.FormatZIP, tarContainer{}))
