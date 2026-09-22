@@ -70,11 +70,18 @@ func (b *childBudget) room(most int64) (int64, bool) {
 	return min(b.bytes, most), true
 }
 
-// spend records a child that was taken.
+// spend records a child that was taken: its bytes and its file slot.
 func (b *childBudget) spend(size int64) {
-	b.files--
-	b.bytes -= size
+	b.takeFile()
+	b.takeBytes(size)
 }
+
+// takeBytes records bytes read without producing a file, for a reader that
+// assembles one child out of several pieces.
+func (b *childBudget) takeBytes(size int64) { b.bytes -= size }
+
+// takeFile records one file, whatever it cost to build.
+func (b *childBudget) takeFile() { b.files-- }
 
 // refuse records a child that was found and rejected. It costs a file slot
 // too: otherwise a small MaxFiles bounds what is kept but not what is
@@ -263,14 +270,14 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 	if !charged {
 		w.files++
 		w.remaining -= int64(len(data))
-	}
-	if w.maxFiles > 0 && w.files > w.maxFiles {
-		node.Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
-		return node, nil
-	}
-	if w.remaining < 0 {
-		node.Err = fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")
-		return node, nil
+		if w.maxFiles > 0 && w.files > w.maxFiles {
+			node.Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+			return node, nil
+		}
+		if w.remaining < 0 {
+			node.Err = fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")
+			return node, nil
+		}
 	}
 	if fingerprint := sha256.Sum256(data); w.markSeen(fingerprint) {
 		node.Err = fmt.Errorf("parserails: already extracted this file")
@@ -295,10 +302,29 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 	// the bytes are already held, and counting a level only when the walk
 	// reaches it lets every level believe the whole budget is still free —
 	// for its siblings' file slots as much as for their bytes.
-	w.files += len(children)
-	for _, child := range children {
-		w.remaining -= int64(len(child.Data))
+	//
+	// The reservation is also the grant: a child that fits here is not
+	// re-checked on the way in, or the last sibling to arrive would refuse
+	// the ones already accepted.
+	granted := len(children)
+	if w.maxFiles > 0 {
+		granted = max(w.maxFiles-w.files, 0)
 	}
+	kept := 0
+	for i := range children {
+		if children[i].Err != nil {
+			continue // a refusal costs nothing to hold
+		}
+		if kept >= granted {
+			children[i].Data = nil
+			children[i].Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+			continue
+		}
+		kept++
+		w.remaining -= int64(len(children[i].Data))
+	}
+	w.files += kept
+
 	for _, child := range children {
 		if child.Err != nil {
 			// Found but not taken: keep it in the tree with its reason.

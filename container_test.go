@@ -365,6 +365,74 @@ func TestExtractForwardsThePasswordToAttachments(t *testing.T) {
 	}
 }
 
+func TestFileQuotaKeepsWhatItAccepted(t *testing.T) {
+	// The quota allows the root plus two entries. Those two must be read:
+	// reserving the whole batch at once, refusal markers included, used to
+	// refuse the siblings that had already been accepted.
+	p := newTestParser(t)
+	archive := zipArchive(map[string][]byte{
+		"a.txt": []byte("one"), "b.txt": []byte("two"), "c.txt": []byte("three"),
+	})
+
+	node, err := p.Extract(context.Background(), archive, ExtractOptions{MaxFiles: 3})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	read := 0
+	node.Walk(func(n *Node) {
+		if n.Text != "" {
+			read++
+		}
+	})
+	if read != 2 {
+		t.Fatalf("read %d files, want the two the quota allowed:\n%s", read, treeSummary(node))
+	}
+}
+
+func TestOneEmbeddedMessageCostsOneFileSlot(t *testing.T) {
+	// A forwarded message is assembled from several property streams; it is
+	// still one file.
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3701000D", Children: []cfbTestEntry{
+				{Name: "__substg1.0_0037001F", Data: utf16Bytes("Hi")},
+				{Name: "__substg1.0_1000001F", Data: utf16Bytes("body")},
+			}},
+		}},
+	})
+	children, err := (msgContainer{}).Children(context.Background(), msg,
+		ChildRequest{MaxFiles: 1, MaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err != nil {
+		t.Fatalf("children = %+v, want the message accepted under MaxFiles=1", children)
+	}
+}
+
+func TestEmbeddedMessageIsBudgetedByWhatItEmits(t *testing.T) {
+	// "Subject: Hi" is longer than the property it was rendered from.
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3701000D", Children: []cfbTestEntry{
+				{Name: "__substg1.0_0037001F", Data: utf16Bytes("Hi")},
+			}},
+		}},
+	})
+	children, err := (msgContainer{}).Children(context.Background(), msg, ChildRequest{MaxBytes: 4})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	for _, c := range children {
+		if len(c.Data) > 4 {
+			t.Fatalf("emitted %d bytes under a 4 byte budget", len(c.Data))
+		}
+		if c.Err == nil {
+			t.Errorf("the refused message should carry a reason: %+v", c)
+		}
+	}
+}
+
 func TestExtractLimitsFileCount(t *testing.T) {
 	p := newTestParser(t)
 	files := map[string][]byte{}

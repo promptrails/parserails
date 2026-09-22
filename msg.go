@@ -62,17 +62,18 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 			if !ok {
 				continue
 			}
-			// A forwarded message is an attachment like any other: its
-			// property streams are read against the same budget.
+			// A forwarded message is an attachment like any other, but it
+			// is assembled from several property streams: each is read
+			// against the budget's bytes, and the file slot is taken once,
+			// for the message, when it is emitted below.
 			limit, room := budget.room(maxChildBytes)
 			if !room || !budget.fits(s.Entry.Size, limit) {
-				budget.refuse()
 				att.err = fmt.Errorf(
 					"parserails: embedded message is larger than the remaining %d byte budget", limit)
 				continue
 			}
 			text := msgString(f.readStream(s.Entry), kind)
-			budget.spend(int64(len(text)))
+			budget.takeBytes(int64(len(text)))
 			att.nested[id] = text
 			continue
 		}
@@ -127,10 +128,21 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 			if name == "" {
 				name = strings.TrimPrefix(sanitizeChildName(storage), msgAttachPrefix)
 			}
-			out = append(out, Child{
-				Name: strings.TrimSuffix(name, ".msg") + ".txt",
-				Data: []byte(msgTextFrom(att.nested)),
-			})
+			name = strings.TrimSuffix(name, ".msg") + ".txt"
+
+			// Rendering adds headers and blank lines, so the budget is
+			// applied to what actually leaves here, not to the properties it
+			// was built from.
+			text := []byte(msgTextFrom(att.nested))
+			limit, room := budget.room(maxChildBytes)
+			if !room || int64(len(text)) > limit {
+				budget.takeFile()
+				out = append(out, Child{Name: name, Err: fmt.Errorf(
+					"parserails: embedded message is larger than the remaining %d byte budget", limit)})
+				continue
+			}
+			budget.spend(int64(len(text)))
+			out = append(out, Child{Name: name, Data: text})
 		}
 	}
 	sortChildren(out)
