@@ -76,6 +76,12 @@ func (b *childBudget) spend(size int64) {
 	b.bytes -= size
 }
 
+// refuse records a child that was found and rejected. It costs a file slot
+// too: otherwise a small MaxFiles bounds what is kept but not what is
+// attempted, and an archive of ten thousand oversized entries is still ten
+// thousand attempts.
+func (b *childBudget) refuse() { b.files-- }
+
 // fits reports whether a size declared by a document fits what is left of the
 // budget. Declared sizes are unsigned and untrusted; the budget never is.
 func (b *childBudget) fits(size uint64, limit int64) bool {
@@ -216,7 +222,7 @@ func (p *Parser) Extract(ctx context.Context, data []byte, opt ExtractOptions) (
 	}
 	w := &walker{parser: p, opt: opt}
 	w.maxDepth, w.maxFiles, w.remaining = opt.limits()
-	return w.visit(ctx, name, data, 0)
+	return w.visit(ctx, name, data, 0, false)
 }
 
 // ExtractFile is the file counterpart of Extract.
@@ -242,7 +248,12 @@ type walker struct {
 	seen      map[[32]byte]bool
 }
 
-func (w *walker) visit(ctx context.Context, name string, data []byte, depth int) (*Node, error) {
+// visit reads one file and descends into it. charged says whether this
+// node's bytes were already taken out of the budget when its parent unpacked
+// it — they are reserved there, before the walk descends, so a nested archive
+// cannot be handed a fresh budget at every level while its siblings are still
+// in memory.
+func (w *walker) visit(ctx context.Context, name string, data []byte, depth int, charged bool) (*Node, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -250,7 +261,9 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int)
 	node := &Node{Name: name, Format: format}
 
 	w.files++
-	w.remaining -= int64(len(data))
+	if !charged {
+		w.remaining -= int64(len(data))
+	}
 	if w.maxFiles > 0 && w.files > w.maxFiles {
 		node.Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
 		return node, nil
@@ -278,6 +291,12 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int)
 		node.Err = err
 		return node, nil
 	}
+	// Reserve what the container unpacked before descending into any of it:
+	// the bytes are already held, and charging them one by one as the walk
+	// reaches them lets each level believe the whole budget is still free.
+	for _, child := range children {
+		w.remaining -= int64(len(child.Data))
+	}
 	for _, child := range children {
 		if child.Err != nil {
 			// Found but not taken: keep it in the tree with its reason.
@@ -285,7 +304,7 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int)
 			w.files++
 			continue
 		}
-		sub, err := w.visit(ctx, child.Name, child.Data, depth+1)
+		sub, err := w.visit(ctx, child.Name, child.Data, depth+1, true)
 		if err != nil {
 			return nil, err // only context cancellation gets here
 		}
@@ -303,14 +322,18 @@ func (w *walker) children(ctx context.Context, container Container, node *Node, 
 		Password: w.opt.Password,
 	}
 	// Zero means "no limit" in the contract, so an exhausted budget has to
-	// stop the walk here rather than be passed on as no limit at all.
+	// stop the walk here rather than be passed on as no limit at all. It is
+	// reported as an unread child, not as this node's error: this file was
+	// read, it is its contents that were not.
 	if w.remaining <= 0 {
-		return nil, fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")
+		return []Child{{Name: node.Name + " (contents)",
+			Err: fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")}}, nil
 	}
 	req.MaxBytes = w.remaining
 	if w.maxFiles > 0 {
 		if w.files >= w.maxFiles {
-			return nil, fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+			return []Child{{Name: node.Name + " (contents)",
+				Err: fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)}}, nil
 		}
 		req.MaxFiles = w.maxFiles - w.files
 	}

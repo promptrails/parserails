@@ -55,7 +55,8 @@ type Node struct {
 and the tree marshals to JSON with each node's error included.
 
 One unreadable file never fails the walk. A corrupt attachment is recorded on
-its own node and the other nine still come back — which is the difference
+its own node and the other nine still come back — as is a file that was found
+but not taken, so a partial extraction never looks complete — which is the difference
 between a batch that finishes and a batch that stops on document 4,000.
 
 ## Limits
@@ -70,10 +71,22 @@ enormously, and can contain themselves.
 | `MaxBytes` | 256 MiB | zip bombs |
 | — | always on | a file that contains itself: identical content is visited once, by hash |
 
+> One gap worth knowing: PDFium hands over an embedded attachment in one
+> piece, with no way to ask its size first, so a PDF attachment is measured
+> after it has been materialized. It is reported and dropped rather than
+> parsed, but a single enormous attachment is held in memory once before that
+> happens. Everything else is bounded before it is read.
+
 Every reader enforces the budget — ZIP entries, PDF attachments, MIME parts,
 OLE and Outlook streams — and an exhausted budget stops the walk rather than
-being passed on as "no limit". The byte budget is spent **as each entry is
-decompressed**, not counted after the fact — an archive of a thousand entries that each expand to 64 MiB would
+being passed on as "no limit". A refused file costs a file slot too, so a
+small `MaxFiles` bounds what is *attempted*, not only what is kept. What a
+container unpacks is charged before the walk descends into it, so a nested
+archive cannot be handed the whole budget again at every level. The budget
+counts **unpacked** bytes: a base64 attachment is measured after decoding.
+
+The byte budget is spent **as each entry is decompressed**, not counted after
+the fact — an archive of a thousand entries that each expand to 64 MiB would
 otherwise allocate 64 GiB before anything checked the total. An entry that
 would exceed what is left is reported as a node with an `Err`, so it is
 visible rather than silently missing.

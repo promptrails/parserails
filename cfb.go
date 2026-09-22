@@ -124,6 +124,10 @@ func (f *cfbFile) readFAT() error {
 	// chain, each sector holding entries plus a pointer to the next. The
 	// chain is followed with a visited set: a sector whose "next" points at
 	// itself would otherwise grow the table forever out of a 4 KiB file.
+	//
+	// The ids it yields are deduplicated below for the same reason: a chain
+	// of sectors filled with one repeated valid id costs a whole sector of
+	// FAT entries each time it appears.
 	next := binary.LittleEndian.Uint32(f.data[68:72])
 	seen := make(map[uint32]bool)
 	for hops := 0; next < cfbEndOfChain && hops < f.sectorCount()+1; hops++ {
@@ -143,12 +147,20 @@ func (f *cfbFile) readFAT() error {
 		next = binary.LittleEndian.Uint32(sec[len(sec)-4:])
 	}
 
+	// A FAT never describes more sectors than the file holds, whatever the
+	// header claims.
+	maxEntries := f.sectorCount() + 1
+	taken := make(map[uint32]bool, len(difat))
 	for _, id := range difat {
+		if taken[id] || len(f.fat) >= maxEntries {
+			continue
+		}
+		taken[id] = true
 		sec := f.sector(id)
 		if sec == nil {
 			continue
 		}
-		for i := 0; i+4 <= len(sec); i += 4 {
+		for i := 0; i+4 <= len(sec) && len(f.fat) < maxEntries; i += 4 {
 			f.fat = append(f.fat, binary.LittleEndian.Uint32(sec[i:i+4]))
 		}
 	}

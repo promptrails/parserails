@@ -36,6 +36,7 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 	type attachment struct {
 		name, tag string
 		data      []byte
+		err       error
 		nested    map[string]string // a message attached to a message
 	}
 	budget := newChildBudget(req)
@@ -72,8 +73,17 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		switch id {
 		case msgPropAttachData:
 			limit, ok := budget.room(maxChildBytes)
-			if !ok || !budget.fits(s.Entry.Size, limit) {
-				continue // too large for what is left of the walk
+			if !ok {
+				att.err = budget.exceeded()
+				continue
+			}
+			if !budget.fits(s.Entry.Size, limit) {
+				// Recorded, not dropped: an attachment that silently
+				// disappears makes a partial extraction look complete.
+				budget.refuse()
+				att.err = fmt.Errorf(
+					"parserails: attachment is larger than the remaining %d byte budget", limit)
+				continue
 			}
 			att.data = f.readStream(s.Entry)
 			budget.spend(int64(len(att.data)))
@@ -88,6 +98,11 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 	for storage, att := range attachments {
 		name := firstNonEmpty(att.name, att.tag)
 		switch {
+		case att.err != nil:
+			if name == "" {
+				name = sanitizeChildName(storage)
+			}
+			out = append(out, Child{Name: name, Err: att.err})
 		case len(att.data) > 0:
 			if name == "" {
 				name = sanitizeChildName(storage) + Sniff(att.data).Ext()

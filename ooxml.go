@@ -272,6 +272,18 @@ func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 				skipAt = depth
 			}
 			switch t.Name.Local {
+			case "tbl":
+				// A table inside a cell: consumed whole, so its rows cannot
+				// reset the row being built around it, and flattened into
+				// the cell's text so nothing is lost.
+				nested, err := docxTable(dec, t)
+				if err != nil {
+					return Block{}, err
+				}
+				depth--
+				if inCel && skipAt == 0 {
+					cell.WriteString(flattenTable(nested))
+				}
 			case "tr":
 				row = nil
 			case "tc":
@@ -322,6 +334,18 @@ func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 		block.Header, block.Rows = rows[0], rows[1:]
 	}
 	return block, nil
+}
+
+// flattenTable renders a nested table as plain text for the cell that holds
+// it: rows on their own lines, cells separated by tabs.
+func flattenTable(block Block) string {
+	var lines []string
+	for _, row := range append([][]Cell{block.Header}, block.Rows...) {
+		if line := joinCells(row); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // xlsxBlocks reads every worksheet as a table, with the sheet name as a
@@ -571,6 +595,15 @@ func densify(rows []map[int]string, width int) [][]Cell {
 		}
 	}
 
+	// Compaction is not a bound: a sheet with one value per row, each in a
+	// different column, has as many columns as rows. When even the compacted
+	// grid is too large, the rows are left ragged — every value kept, in
+	// column order, with no alignment between rows. Alignment is what cannot
+	// be afforded here; the data is not.
+	if int64(len(rows))*int64(len(columns)) > maxSheetCells {
+		return raggedRows(rows)
+	}
+
 	at := make(map[int]int, len(columns))
 	for i, col := range columns {
 		at[col] = i
@@ -582,6 +615,26 @@ func densify(rows []map[int]string, width int) [][]Cell {
 			if i, ok := at[col]; ok {
 				cells[i] = Cell{Text: text}
 			}
+		}
+		out = append(out, cells)
+	}
+	return out
+}
+
+// raggedRows emits each row's own values in column order, without expanding
+// them onto a shared grid.
+func raggedRows(rows []map[int]string) [][]Cell {
+	out := make([][]Cell, 0, len(rows))
+	for _, row := range rows {
+		columns := make([]int, 0, len(row))
+		for col := range row {
+			columns = append(columns, col)
+		}
+		sort.Ints(columns)
+
+		cells := make([]Cell, 0, len(columns))
+		for _, col := range columns {
+			cells = append(cells, Cell{Text: row[col]})
 		}
 		out = append(out, cells)
 	}

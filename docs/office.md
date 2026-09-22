@@ -93,7 +93,10 @@ boxes, `ReadOfficeDocument` when you need text and structure.
 A worksheet is expanded into a grid only while that grid is reasonably full: a
 sheet whose handful of values sit in the last column would otherwise become
 16384 cells a row, so such a sheet is compacted onto the columns that carry
-something (the blank columns are lost, the values are not).
+something (the blank columns are lost, the values are not). A sheet too sparse
+even for that — one value per row, each in a different column — is left
+ragged, every row holding only its own values in column order. Alignment is
+what gets given up under pressure; the data is not.
 
 Text extraction falls back to native reading **by itself** when LibreOffice is
 missing and the input is an OOXML package, so a container walk through an

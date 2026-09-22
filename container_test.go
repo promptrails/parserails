@@ -157,6 +157,124 @@ func TestPDFAttachmentsRespectTheBudget(t *testing.T) {
 	}
 }
 
+func TestZipRefusalsSpendTheFileBudget(t *testing.T) {
+	// A small MaxFiles must bound what is attempted, not only what is kept:
+	// otherwise every entry of a huge archive is still opened and refused.
+	files := map[string][]byte{}
+	for i := 0; i < 20; i++ {
+		files[fmt.Sprintf("big-%02d.bin", i)] = make([]byte, 1024)
+	}
+	children, err := zipEntries(zipArchive(files), ChildRequest{MaxFiles: 1, MaxBytes: 1},
+		func(string) bool { return true })
+	if err != nil {
+		t.Fatalf("zipEntries: %v", err)
+	}
+	if len(children) > 2 {
+		t.Fatalf("attempted %d entries with MaxFiles=1", len(children))
+	}
+}
+
+func TestNestedArchivesShareOneBudget(t *testing.T) {
+	p := newTestParser(t)
+	// Each level holds a megabyte. Charging a level only when the walk
+	// reaches it would hand every level the whole budget again.
+	inner := zipArchive(map[string][]byte{"inner.bin": make([]byte, 1<<20)})
+	outer := zipArchive(map[string][]byte{"inner.zip": inner, "outer.bin": make([]byte, 1<<20)})
+
+	node, err := p.Extract(context.Background(), outer, ExtractOptions{MaxBytes: 1536 << 10})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	var unpacked int
+	node.Walk(func(n *Node) {
+		if n.Document != nil {
+			unpacked += len(n.Document.Pages)
+		}
+	})
+	var refused int
+	node.Walk(func(n *Node) {
+		if n.Err != nil {
+			refused++
+		}
+	})
+	if refused == 0 {
+		t.Fatalf("nothing was refused under a 1.5 MiB budget: %s", treeSummary(node))
+	}
+}
+
+func TestMailAttachmentsAreMeasuredDecoded(t *testing.T) {
+	// MaxBytes counts unpacked bytes; base64 is a third larger than what it
+	// carries, so measuring the encoded form refuses attachments that fit.
+	eml := emailWithAttachment("subject", "body", "small.bin", []byte("123456"))
+	children, err := (emlContainer{}).Children(context.Background(), eml, ChildRequest{MaxBytes: 6})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err != nil {
+		t.Fatalf("children = %+v, want the 6-byte attachment accepted", children)
+	}
+}
+
+func TestUnnamedMailPartsAreBudgeted(t *testing.T) {
+	// An inline application/octet-stream is an attachment in everything but
+	// its headers.
+	var b bytes.Buffer
+	b.WriteString("From: a@b.c\r\nSubject: hi\r\nMIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: multipart/mixed; boundary=B\r\n\r\n")
+	b.WriteString("--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n")
+	b.WriteString("--B\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("X"), 64)))
+	b.WriteString("\r\n--B--\r\n")
+
+	children, err := (emlContainer{}).Children(context.Background(), b.Bytes(), ChildRequest{MaxBytes: 8})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	for _, c := range children {
+		if len(c.Data) > 8 {
+			t.Fatalf("part %q is %d bytes under an 8 byte budget", c.Name, len(c.Data))
+		}
+		if c.Err == nil {
+			t.Errorf("the refused part should carry a reason: %+v", c)
+		}
+	}
+}
+
+func TestOversizedMSGAttachmentIsReportedNotDropped(t *testing.T) {
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__substg1.0_0037001F", Data: utf16Bytes("subject")},
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3707001F", Data: utf16Bytes("big.bin")},
+			{Name: "__substg1.0_37010102", Data: bytes.Repeat([]byte("A"), 64)},
+		}},
+	})
+	children, err := (msgContainer{}).Children(context.Background(), msg, ChildRequest{MaxBytes: 8})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err == nil {
+		t.Fatalf("children = %+v, want the attachment reported with a reason", children)
+	}
+	if children[0].Name != "big.bin" {
+		t.Errorf("name = %q, want the attachment's own", children[0].Name)
+	}
+}
+
+func TestOlePackageHeaderIsNotChargedToThePayload(t *testing.T) {
+	// The stream carries the original and temporary paths ahead of the
+	// payload; the budget is about what comes out of it.
+	ole := buildCFB([]cfbTestEntry{
+		{Name: "\x01Ole10Native", Data: ole10Native("tiny.png", []byte("\x89PNG\r\n\x1a\n"))},
+	})
+	children, err := (oleContainer{}).Children(context.Background(), ole, ChildRequest{MaxBytes: 16})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err != nil {
+		t.Fatalf("children = %+v, want the small payload accepted", children)
+	}
+}
+
 func TestExtractForwardsThePasswordToAttachments(t *testing.T) {
 	p := newTestParser(t)
 	node, err := p.Extract(context.Background(), encryptedPDF("Secret Report", "hunter2"),

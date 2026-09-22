@@ -18,6 +18,10 @@ import (
 // budget; this stops one entry from spending all of it.
 const maxChildBytes = 128 << 20
 
+// maxOle10Header is how much of a package stream may be header — label,
+// original path, temporary path — ahead of the payload it wraps.
+const maxOle10Header = 4 << 10
+
 // zipContainer yields every file in a ZIP archive.
 type zipContainer struct{}
 
@@ -67,9 +71,11 @@ func zipEntries(data []byte, req ChildRequest, keep func(string) bool) ([]Child,
 		switch {
 		case err != nil:
 			// A broken entry is not a broken archive.
+			budget.refuse()
 			out = append(out, Child{Name: f.Name, Err: fmt.Errorf("parserails: read zip entry: %w", err)})
 			continue
 		case int64(len(body)) > limit:
+			budget.refuse()
 			out = append(out, Child{Name: f.Name,
 				Err: fmt.Errorf("parserails: entry is larger than the remaining %d byte budget", limit)})
 			continue
@@ -159,6 +165,7 @@ func (c pdfContainer) Children(_ context.Context, data []byte, req ChildRequest)
 			continue
 		}
 		if int64(len(file.Contents)) > limit {
+			budget.refuse()
 			out = append(out, Child{Name: name,
 				Err: fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)})
 			continue
@@ -206,10 +213,17 @@ func (oleContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 	for _, s := range f.streams() {
 		limit, ok := budget.room(maxChildBytes)
 		if !ok {
+			out = append(out, Child{Name: strings.TrimPrefix(s.Path, "\x01"), Err: budget.exceeded()})
 			break
 		}
-		if !budget.fits(s.Entry.Size, limit) {
-			continue // a stream too large for what is left of the walk
+		// A package stream carries file paths and a header ahead of the
+		// payload, so the budget is measured against what comes out of it,
+		// not against the wrapper it arrives in.
+		if !budget.fits(s.Entry.Size, limit+maxOle10Header) {
+			budget.refuse()
+			out = append(out, Child{Name: strings.TrimPrefix(s.Path, "\x01"),
+				Err: fmt.Errorf("parserails: stream is larger than the remaining %d byte budget", limit)})
+			continue
 		}
 		body := f.readStream(s.Entry)
 		if len(body) == 0 {
@@ -218,7 +232,13 @@ func (oleContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		name := strings.TrimPrefix(s.Path, "\x01")
 		if strings.Contains(s.Path, "Ole10Native") {
 			if child, ok := parseOle10Native(body); ok {
-				budget.spend(int64(len(child.Data)))
+				if int64(len(child.Data)) > limit {
+					budget.refuse()
+					child.Data, child.Err = nil, fmt.Errorf(
+						"parserails: payload is larger than the remaining %d byte budget", limit)
+				} else {
+					budget.spend(int64(len(child.Data)))
+				}
 				out = append(out, child)
 				continue
 			}
@@ -227,6 +247,12 @@ func (oleContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		// property sets) are not embedded files; only take what stands alone.
 		if format := Sniff(body); format == FormatPDF || format.IsOOXML() ||
 			format.IsImage() || format == FormatZIP {
+			if int64(len(body)) > limit {
+				budget.refuse()
+				out = append(out, Child{Name: name + format.Ext(),
+					Err: fmt.Errorf("parserails: stream is larger than the remaining %d byte budget", limit)})
+				continue
+			}
 			budget.spend(int64(len(body)))
 			out = append(out, Child{Name: name + format.Ext(), Data: body})
 		}

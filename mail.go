@@ -3,6 +3,7 @@ package parserails
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -69,19 +70,25 @@ func walkMailPart(contentType, encoding string, body io.Reader, budget *childBud
 		return walkMultipart(multipart.NewReader(body, boundary), mediaType == "multipart/alternative", budget)
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(body, maxChildBytes))
-	if err != nil {
-		return "", nil, fmt.Errorf("parserails: read mail part: %w", err)
-	}
-	decoded := decodeTransfer(raw, encoding)
-	switch mediaType {
-	case "text/plain":
+	// Text is the message, not an attachment, so it is read against the
+	// per-file cap; anything else is a child and is charged to the budget.
+	if mediaType == "text/plain" || mediaType == "text/html" {
+		raw, err := io.ReadAll(io.LimitReader(body, maxChildBytes))
+		if err != nil {
+			return "", nil, fmt.Errorf("parserails: read mail part: %w", err)
+		}
+		decoded := decodeTransfer(raw, encoding)
+		if mediaType == "text/html" {
+			return stripHTML(string(decoded)), nil, nil
+		}
 		return string(decoded), nil, nil
-	case "text/html":
-		return stripHTML(string(decoded)), nil, nil
-	default:
-		return "", []Child{{Name: "part", Data: decoded}}, nil
 	}
+
+	// A part with no file name and no disposition is still a file: an inline
+	// application/octet-stream is an attachment in everything but its
+	// headers, and skipping the budget here left the largest parts unmetered.
+	child := readMailChild(body, encoding, "part", budget)
+	return "", []Child{child}, nil
 }
 
 // walkMultipart reads the parts of a multipart body. In an "alternative" body
@@ -106,25 +113,11 @@ func walkMultipart(mr *multipart.Reader, alternative bool, budget *childBudget) 
 
 		if isAttachment(disposition, part.FileName()) {
 			name := mimeFilename(disposition, contentType, len(attachments)+1)
-			limit, ok := budget.room(maxChildBytes)
-			if !ok {
-				attachments = append(attachments, Child{Name: name, Err: budget.exceeded()})
+			child := readMailChild(part, part.Header.Get("Content-Transfer-Encoding"), name, budget)
+			attachments = append(attachments, child)
+			if child.Err != nil && errors.Is(child.Err, errBudgetSpent) {
 				break
 			}
-			// Read one byte past what is left: base64 shrinks by a quarter,
-			// so the encoded form is the conservative thing to measure.
-			raw, err := io.ReadAll(io.LimitReader(part, limit+1))
-			if err != nil {
-				continue
-			}
-			if int64(len(raw)) > limit {
-				attachments = append(attachments, Child{Name: name,
-					Err: fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)})
-				continue
-			}
-			data := decodeTransfer(raw, part.Header.Get("Content-Transfer-Encoding"))
-			budget.spend(int64(len(data)))
-			attachments = append(attachments, Child{Name: name, Data: data})
 			continue
 		}
 
@@ -150,6 +143,39 @@ func walkMultipart(mr *multipart.Reader, alternative bool, budget *childBudget) 
 		return best, attachments, nil
 	}
 	return strings.Join(texts, "\n\n"), attachments, nil
+}
+
+// errBudgetSpent marks the end of the walk's budget, as opposed to one part
+// being too large for what is left of it.
+var errBudgetSpent = errors.New("parserails: extraction stopped: the walk's remaining budget is spent")
+
+// readMailChild reads one part as an embedded file, within the budget.
+//
+// The budget counts unpacked bytes, so the transfer encoding is undone before
+// the size is judged: base64 is a third larger than what it carries, and
+// measuring the encoded form refused attachments that fit.
+func readMailChild(r io.Reader, encoding, name string, budget *childBudget) Child {
+	limit, ok := budget.room(maxChildBytes)
+	if !ok {
+		return Child{Name: name, Err: errBudgetSpent}
+	}
+
+	// Read enough encoded bytes to cover limit decoded ones, plus one to tell
+	// "exactly at the limit" from "over it".
+	encodedCap := limit + limit/3 + 8
+	raw, err := io.ReadAll(io.LimitReader(r, encodedCap))
+	if err != nil {
+		budget.refuse()
+		return Child{Name: name, Err: fmt.Errorf("parserails: read mail part: %w", err)}
+	}
+	data := decodeTransfer(raw, encoding)
+	if int64(len(data)) > limit {
+		budget.refuse()
+		return Child{Name: name,
+			Err: fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)}
+	}
+	budget.spend(int64(len(data)))
+	return Child{Name: name, Data: data}
 }
 
 func isAttachment(disposition, filename string) bool {

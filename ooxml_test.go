@@ -77,6 +77,70 @@ func TestDocxCellsKeepParagraphBoundaries(t *testing.T) {
 	}
 }
 
+func TestDocxNestedTableKeepsTheOuterRow(t *testing.T) {
+	docx := zipArchive(map[string][]byte{
+		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body><w:tbl><w:tr>` +
+			`<w:tc><w:p><w:r><w:t>outer left</w:t></w:r></w:p>` +
+			`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>inner a</w:t></w:r></w:p></w:tc>` +
+			`<w:tc><w:p><w:r><w:t>inner b</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` +
+			`</w:tc>` +
+			`<w:tc><w:p><w:r><w:t>outer right</w:t></w:r></w:p></w:tc>` +
+			`</w:tr></w:tbl></w:body></w:document>`),
+	})
+	doc, err := ReadOfficeDocument(docx, FormatDOCX)
+	if err != nil {
+		t.Fatalf("ReadOfficeDocument: %v", err)
+	}
+	rows := doc.Blocks[0].Rows // one row, so nothing was taken as a header
+	if len(rows) != 1 || len(rows[0]) != 2 {
+		t.Fatalf("outer row = %+v, want two cells", rows)
+	}
+	if rows[0][1].Text != "outer right" {
+		t.Errorf("the nested table swallowed the next cell: %+v", rows[0])
+	}
+	if !strings.Contains(rows[0][0].Text, "inner a") {
+		t.Errorf("the nested table's text was dropped: %q", rows[0][0].Text)
+	}
+}
+
+func TestSheetRowsKeepsEveryValueWhenTheGridCannotBeBuilt(t *testing.T) {
+	// One value per row, each in its own column: even compacted, the grid
+	// would be rows x rows. The values survive; only the alignment does not.
+	var sheet strings.Builder
+	sheet.WriteString("<worksheet><sheetData>")
+	for r := 1; r <= 1100; r++ {
+		fmt.Fprintf(&sheet, `<row r="%d"><c r="%s%d"><v>%d</v></c></row>`, r, spreadsheetColumn(r), r, r)
+	}
+	sheet.WriteString("</sheetData></worksheet>")
+
+	rows, err := sheetRows([]byte(sheet.String()), nil)
+	if err != nil {
+		t.Fatalf("sheetRows: %v", err)
+	}
+	if len(rows) != 1100 {
+		t.Fatalf("got %d rows, want 1100", len(rows))
+	}
+	for i, row := range rows {
+		if len(row) != 1 {
+			t.Fatalf("row %d is %d cells wide; the grid was built after all", i, len(row))
+		}
+		if want := fmt.Sprint(i + 1); row[0].Text != want {
+			t.Fatalf("row %d = %q, want %q", i, row[0].Text, want)
+		}
+	}
+}
+
+// spreadsheetColumn turns 1-based n into a column reference (A, B, … AA).
+func spreadsheetColumn(n int) string {
+	var out []byte
+	for n > 0 {
+		n--
+		out = append([]byte{byte('A' + n%26)}, out...)
+		n /= 26
+	}
+	return string(out)
+}
+
 func TestDocxSkipsTrackedDeletionsAndFieldCodes(t *testing.T) {
 	docx := zipArchive(map[string][]byte{
 		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body><w:p>` +
