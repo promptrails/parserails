@@ -456,7 +456,7 @@ func sharedStrings(zr *zip.Reader) []string {
 // next column".
 func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 	var (
-		rows     [][]Cell
+		rows     []map[int]string
 		row      map[int]string
 		width    int
 		column   int
@@ -517,33 +517,75 @@ func sheetRows(data []byte, strs []string) ([][]Cell, error) {
 				cellText.Reset()
 			case "row":
 				if len(row) > 0 {
-					rows = append(rows, spreadRow(row, width))
+					rows = append(rows, row)
 				}
 				row = nil
 			}
 		}
 	}
-	return padRows(rows, width), nil
+	return densify(rows, width), nil
 }
 
-func spreadRow(row map[int]string, width int) []Cell {
-	cells := make([]Cell, width)
-	for col, text := range row {
-		if col >= 0 && col < width {
-			cells[col] = Cell{Text: text}
-		}
-	}
-	return cells
-}
+// Limits on expanding a worksheet into a grid. Columns run to XFD, so a
+// handful of values parked at the far right would otherwise become 16384
+// cells per row — fifteen megabytes for twenty numbers, gigabytes for a sheet
+// with a few thousand rows.
+const (
+	maxSheetCells    = 1 << 20 // never expand past this many cells
+	denseGridFloor   = 4096    // below this, expand whatever the shape
+	denseGridDivisor = 8       // expand while at least 1/8 of the grid is filled
+)
 
-func padRows(rows [][]Cell, width int) [][]Cell {
-	for i, row := range rows {
-		for len(row) < width {
-			row = append(row, Cell{})
-		}
-		rows[i] = row
+// densify turns sparse rows into a rectangular grid, keeping blank columns so
+// values stay under their headers. A sheet too sparse to expand that way is
+// compacted onto the columns that actually carry something: the gaps are lost,
+// which is worth it against the alternative of not reading the sheet at all.
+func densify(rows []map[int]string, width int) [][]Cell {
+	if len(rows) == 0 || width == 0 {
+		return nil
 	}
-	return rows
+
+	total := int64(width) * int64(len(rows))
+	var filled int64
+	for _, row := range rows {
+		filled += int64(len(row))
+	}
+
+	columns := make([]int, 0, width)
+	// Expand to the real grid while it is reasonably full; compact when it
+	// would be mostly empty, or simply too large.
+	if total > maxSheetCells || (total > denseGridFloor && filled*denseGridDivisor < total) {
+		used := map[int]bool{}
+		for _, row := range rows {
+			for col := range row {
+				used[col] = true
+			}
+		}
+		for col := range used {
+			columns = append(columns, col)
+		}
+		sort.Ints(columns)
+	} else {
+		for col := 0; col < width; col++ {
+			columns = append(columns, col)
+		}
+	}
+
+	at := make(map[int]int, len(columns))
+	for i, col := range columns {
+		at[col] = i
+	}
+	out := make([][]Cell, 0, len(rows))
+	for _, row := range rows {
+		cells := make([]Cell, len(columns))
+		for col, text := range row {
+			if i, ok := at[col]; ok {
+				cells[i] = Cell{Text: text}
+			}
+		}
+		out = append(out, cells)
+	}
+	return out
 }
 
 // maxSpreadsheetColumn is Excel's last column, XFD. A reference past it is not

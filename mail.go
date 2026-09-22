@@ -40,6 +40,7 @@ func emlText(data []byte) (string, error) {
 		msg.Header.Get("Content-Type"),
 		msg.Header.Get("Content-Transfer-Encoding"),
 		msg.Body,
+		newChildBudget(ChildRequest{}),
 	)
 	if err != nil {
 		return strings.TrimSpace(b.String()), err
@@ -54,7 +55,7 @@ func emlText(data []byte) (string, error) {
 // walkMailPart reads one MIME part, returning its readable text and the
 // attachments below it. Nested multiparts — the usual mixed/alternative/related
 // nesting real mail clients emit — are walked recursively.
-func walkMailPart(contentType, encoding string, body io.Reader) (string, []Child, error) {
+func walkMailPart(contentType, encoding string, body io.Reader, budget *childBudget) (string, []Child, error) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil || contentType == "" {
 		mediaType = "text/plain" // a message with no Content-Type is plain text
@@ -65,7 +66,7 @@ func walkMailPart(contentType, encoding string, body io.Reader) (string, []Child
 		if boundary == "" {
 			return "", nil, nil
 		}
-		return walkMultipart(multipart.NewReader(body, boundary), mediaType == "multipart/alternative")
+		return walkMultipart(multipart.NewReader(body, boundary), mediaType == "multipart/alternative", budget)
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(body, maxChildBytes))
@@ -86,7 +87,7 @@ func walkMailPart(contentType, encoding string, body io.Reader) (string, []Child
 // walkMultipart reads the parts of a multipart body. In an "alternative" body
 // the parts are the same content in different forms, so the best single one
 // wins instead of all of them being concatenated.
-func walkMultipart(mr *multipart.Reader, alternative bool) (string, []Child, error) {
+func walkMultipart(mr *multipart.Reader, alternative bool, budget *childBudget) (string, []Child, error) {
 	var (
 		texts       []string
 		attachments []Child
@@ -104,19 +105,30 @@ func walkMultipart(mr *multipart.Reader, alternative bool) (string, []Child, err
 		contentType := part.Header.Get("Content-Type")
 
 		if isAttachment(disposition, part.FileName()) {
-			raw, err := io.ReadAll(io.LimitReader(part, maxChildBytes))
+			name := mimeFilename(disposition, contentType, len(attachments)+1)
+			limit, ok := budget.room(maxChildBytes)
+			if !ok {
+				attachments = append(attachments, Child{Name: name, Err: budget.exceeded()})
+				break
+			}
+			// Read one byte past what is left: base64 shrinks by a quarter,
+			// so the encoded form is the conservative thing to measure.
+			raw, err := io.ReadAll(io.LimitReader(part, limit+1))
 			if err != nil {
 				continue
 			}
+			if int64(len(raw)) > limit {
+				attachments = append(attachments, Child{Name: name,
+					Err: fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)})
+				continue
+			}
 			data := decodeTransfer(raw, part.Header.Get("Content-Transfer-Encoding"))
-			attachments = append(attachments, Child{
-				Name: mimeFilename(disposition, contentType, len(attachments)+1),
-				Data: data,
-			})
+			budget.spend(int64(len(data)))
+			attachments = append(attachments, Child{Name: name, Data: data})
 			continue
 		}
 
-		text, nested, err := walkMailPart(contentType, part.Header.Get("Content-Transfer-Encoding"), part)
+		text, nested, err := walkMailPart(contentType, part.Header.Get("Content-Transfer-Encoding"), part, budget)
 		if err != nil {
 			continue
 		}

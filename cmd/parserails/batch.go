@@ -188,7 +188,11 @@ func planOutputs(inputs []string, inDir, outDir, suffix string) map[string]strin
 		stems[strings.TrimSuffix(rel, filepath.Ext(rel))]++
 	}
 
+	// Keeping the extension resolves the common collision, but not every one:
+	// "report.pdf" and "report.pdf.docx" both want "report.pdf.txt". Whatever
+	// the names, each output is claimed exactly once.
 	out := make(map[string]string, len(inputs))
+	taken := make(map[string]bool, len(inputs))
 	for _, in := range inputs {
 		rel := rels[in]
 		stem := strings.TrimSuffix(rel, filepath.Ext(rel))
@@ -196,7 +200,12 @@ func planOutputs(inputs []string, inDir, outDir, suffix string) map[string]strin
 		if stems[stem] > 1 {
 			name = rel + suffix // report.pdf.txt, report.docx.txt
 		}
-		out[in] = filepath.Join(outDir, name)
+		path := filepath.Join(outDir, name)
+		for n := 2; taken[path]; n++ {
+			path = filepath.Join(outDir, fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, suffix), n, suffix))
+		}
+		taken[path] = true
+		out[in] = path
 	}
 	return out
 }

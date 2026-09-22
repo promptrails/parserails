@@ -22,6 +22,10 @@ type imageBox struct {
 type pdfPage struct {
 	Runs   []textRun
 	Images []imageBox
+	// FormImages are drawn through a Form XObject, the way a real document
+	// wraps a placed figure, so the image is a nested object rather than a
+	// direct child of the page.
+	FormImages []imageBox
 }
 
 const (
@@ -54,6 +58,18 @@ func pdfWithPageSpecs(pages []pdfPage) []byte {
 			name := fmt.Sprintf("Im%d", i+1)
 			xobjects = append(xobjects, fmt.Sprintf("/%s %d 0 R", name, num))
 			fmt.Fprintf(&content, "q %g 0 0 %g %g %g cm /%s Do Q\n", img.W, img.H, img.X, img.Y, name)
+		}
+		for i, img := range page.FormImages {
+			imageNum := add(imageXObject())
+			imageName := fmt.Sprintf("FmIm%d", i+1)
+			inner := fmt.Sprintf("q 1 0 0 1 0 0 cm /%s Do Q\n", imageName)
+			formNum := add(fmt.Sprintf(
+				"<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] "+
+					"/Resources << /XObject << /%s %d 0 R >> >> /Length %d >>\nstream\n%sendstream",
+				imageName, imageNum, len(inner), inner))
+			formName := fmt.Sprintf("Fm%d", i+1)
+			xobjects = append(xobjects, fmt.Sprintf("/%s %d 0 R", formName, formNum))
+			fmt.Fprintf(&content, "q %g 0 0 %g %g %g cm /%s Do Q\n", img.W, img.H, img.X, img.Y, formName)
 		}
 		for _, r := range page.Runs {
 			size := r.Size

@@ -119,6 +119,44 @@ func TestExtractStopsUnpackingAtTheByteBudget(t *testing.T) {
 	}
 }
 
+func TestZipEntriesTreatAnExhaustedBudgetAsExhausted(t *testing.T) {
+	// Zero means "no limit" in the contract, so a budget that runs out must
+	// not be handed on as one.
+	archive := zipArchive(map[string][]byte{
+		"a.bin": make([]byte, 4),
+		"b.bin": make([]byte, 4),
+	})
+	children, err := zipEntries(archive, ChildRequest{MaxBytes: 4}, func(string) bool { return true })
+	if err != nil {
+		t.Fatalf("zipEntries: %v", err)
+	}
+	var unpacked int
+	for _, c := range children {
+		unpacked += len(c.Data)
+	}
+	if unpacked > 4 {
+		t.Fatalf("unpacked %d bytes under a 4 byte budget", unpacked)
+	}
+}
+
+func TestPDFAttachmentsRespectTheBudget(t *testing.T) {
+	p := newTestParser(t)
+	pdf := pdfWithAttachment("payload.bin", bytes.Repeat([]byte("A"), 64))
+
+	children, err := pdfContainer{parser: p}.Children(context.Background(), pdf, ChildRequest{MaxBytes: 8})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	for _, c := range children {
+		if len(c.Data) > 8 {
+			t.Fatalf("returned %d bytes under an 8 byte budget", len(c.Data))
+		}
+		if c.Err == nil {
+			t.Errorf("the oversized attachment should be reported, not dropped: %+v", c)
+		}
+	}
+}
+
 func TestExtractForwardsThePasswordToAttachments(t *testing.T) {
 	p := newTestParser(t)
 	node, err := p.Extract(context.Background(), encryptedPDF("Secret Report", "hunter2"),

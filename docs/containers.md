@@ -70,8 +70,10 @@ enormously, and can contain themselves.
 | `MaxBytes` | 256 MiB | zip bombs |
 | — | always on | a file that contains itself: identical content is visited once, by hash |
 
-The byte budget is spent **as each entry is decompressed**, not counted after
-the fact — an archive of a thousand entries that each expand to 64 MiB would
+Every reader enforces the budget — ZIP entries, PDF attachments, MIME parts,
+OLE and Outlook streams — and an exhausted budget stops the walk rather than
+being passed on as "no limit". The byte budget is spent **as each entry is
+decompressed**, not counted after the fact — an archive of a thousand entries that each expand to 64 MiB would
 otherwise allocate 64 GiB before anything checked the total. An entry that
 would exceed what is left is reported as a node with an `Err`, so it is
 visible rather than silently missing.

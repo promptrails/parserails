@@ -70,6 +70,10 @@ Exit codes make it a shell predicate:
 parserails is-complex -q report.pdf && parserails parse report.pdf
 ```
 
+Figures placed through a Form XObject — how most documents place one — are
+counted too: the walk descends into form objects and maps their contents back
+onto the page through the form's matrix.
+
 > On the native `parserails_cgo` backend built **without** PDFium's
 > experimental API, raster objects cannot be enumerated; image coverage then
 > reports zero and only the text-based reasons fire.

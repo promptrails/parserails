@@ -90,6 +90,11 @@ and where a table's cells are, so none of it has to be inferred from
 positions — but it has no coordinates at all. Use `ParseFile` when you need
 boxes, `ReadOfficeDocument` when you need text and structure.
 
+A worksheet is expanded into a grid only while that grid is reasonably full: a
+sheet whose handful of values sit in the last column would otherwise become
+16384 cells a row, so such a sheet is compacted onto the columns that carry
+something (the blank columns are lost, the values are not).
+
 Text extraction falls back to native reading **by itself** when LibreOffice is
 missing and the input is an OOXML package, so a container walk through an
 archive of `.docx` files still produces text on a machine with no LibreOffice

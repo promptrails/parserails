@@ -37,7 +37,7 @@ const (
 type cfbFile struct {
 	data        []byte
 	sectorSize  int
-	miniSize    int
+	miniSize    uint64
 	miniCutoff  uint32
 	fat         []uint32
 	miniFAT     []uint32
@@ -73,7 +73,7 @@ func openCFB(data []byte) (*cfbFile, error) {
 		return nil, fmt.Errorf("parserails: compound file has an implausible sector size")
 	}
 	f.sectorSize = 1 << sectorShift
-	f.miniSize = 1 << miniShift
+	f.miniSize = uint64(1) << miniShift
 	f.miniCutoff = binary.LittleEndian.Uint32(data[56:60])
 
 	if err := f.readFAT(); err != nil {
@@ -262,14 +262,11 @@ func (f *cfbFile) readStream(e cfbEntry) []byte {
 			break
 		}
 		seen[id] = true
-		// Computed in uint64 and compared before narrowing: id is a 32-bit
-		// number from the file, and id*miniSize overflows int for a large
-		// one, wrapping past the bounds check into a negative slice index.
-		from := uint64(id) * uint64(f.miniSize)
-		if from+uint64(f.miniSize) > uint64(len(f.miniStream)) {
+		from, to, ok := f.miniSectorRange(id)
+		if !ok {
 			break
 		}
-		out = append(out, f.miniStream[from:from+uint64(f.miniSize)]...)
+		out = append(out, f.miniStream[from:to]...)
 		if int(id) >= len(f.miniFAT) {
 			break
 		}
@@ -279,6 +276,21 @@ func (f *cfbFile) readStream(e cfbEntry) []byte {
 		out = out[:e.Size]
 	}
 	return out
+}
+
+// miniSectorRange locates a mini sector inside the mini stream.
+//
+// The sector id comes from the file, and id*miniSize overflows int for a
+// large one — wrapping past a bounds check into a negative slice index — so
+// the arithmetic happens in uint64 and narrows only once it is known to fit.
+func (f *cfbFile) miniSectorRange(id uint32) (from, to uint64, ok bool) {
+	start := uint64(id) * f.miniSize
+	end := start + f.miniSize
+	streamLen := uint64(len(f.miniStream)) // #nosec G115 -- a length is never negative
+	if end < start || end > streamLen {
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 // streams lists every stream in the file with its path, walking the directory

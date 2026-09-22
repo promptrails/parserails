@@ -185,6 +185,47 @@ func TestSheetRowsSurvivesImpossibleReference(t *testing.T) {
 	}
 }
 
+func TestSheetRowsCompactsASparseGrid(t *testing.T) {
+	// Twenty values parked in the last column. Expanded to the real grid
+	// that is 16384 cells a row, which is fifteen megabytes for twenty
+	// numbers — and gigabytes once the sheet has a few thousand rows.
+	var sheet strings.Builder
+	sheet.WriteString("<worksheet><sheetData>")
+	for r := 1; r <= 20; r++ {
+		fmt.Fprintf(&sheet, `<row r="%d"><c r="XFD%d"><v>%d</v></c></row>`, r, r, r)
+	}
+	sheet.WriteString("</sheetData></worksheet>")
+
+	rows, err := sheetRows([]byte(sheet.String()), nil)
+	if err != nil {
+		t.Fatalf("sheetRows: %v", err)
+	}
+	if len(rows) != 20 {
+		t.Fatalf("got %d rows, want 20", len(rows))
+	}
+	if width := len(rows[0]); width > 4 {
+		t.Errorf("row is %d cells wide for one value; the grid was not compacted", width)
+	}
+	// Every value is still there.
+	if rows[0][len(rows[0])-1].Text != "1" || rows[19][len(rows[19])-1].Text != "20" {
+		t.Errorf("values lost: %+v … %+v", rows[0], rows[19])
+	}
+}
+
+func TestSheetRowsKeepsGapsInAnOrdinaryGrid(t *testing.T) {
+	// A normal sheet with one empty column keeps it: compaction is for the
+	// pathological case, not for every gap.
+	rows, err := sheetRows([]byte(`<worksheet><sheetData>`+
+		`<row r="1"><c r="A1"><v>1</v></c><c r="C1"><v>3</v></c></row>`+
+		`</sheetData></worksheet>`), nil)
+	if err != nil {
+		t.Fatalf("sheetRows: %v", err)
+	}
+	if len(rows[0]) != 3 || rows[0][1].Text != "" || rows[0][2].Text != "3" {
+		t.Fatalf("row = %+v, want the gap at B preserved", rows[0])
+	}
+}
+
 func TestOfficeTextKeepsColumnPositions(t *testing.T) {
 	office := &OfficeDocument{Blocks: []Block{{
 		Kind: BlockTable,

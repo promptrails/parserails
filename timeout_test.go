@@ -143,6 +143,20 @@ func TestAwaitBoundedReportsATimeoutWhenNothingFinished(t *testing.T) {
 	}
 }
 
+func TestNativeOfficeReadingHonoursCancellation(t *testing.T) {
+	p := newTestParser(t, WithNativeOffice(), WithTimeout(time.Second))
+	docx := zipArchive(map[string][]byte{
+		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body>` +
+			`<w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body></w:document>`),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.ExtractTextData(ctx, docx, ReadOptions{Name: "memo.docx"}); err == nil {
+		t.Fatal("a cancelled context still produced a document")
+	}
+}
+
 func TestBoundedRunsInlineWithoutATimeout(t *testing.T) {
 	p := &Parser{}
 	got, err := bounded(context.Background(), p, func(ctx context.Context) (string, error) {

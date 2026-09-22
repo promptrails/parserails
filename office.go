@@ -102,21 +102,30 @@ func (p *Parser) convertDataToPDF(ctx context.Context, data []byte, format Forma
 // be read without it.
 func (p *Parser) officeText(ctx context.Context, data []byte, format Format, opt ReadOptions) (string, error) {
 	if p.nativeOffice && format.IsOOXML() {
-		doc, err := ReadOfficeDocument(data, format)
-		if err != nil {
-			return "", err
-		}
-		return doc.Text(), nil
+		return p.nativeOfficeText(ctx, data, format)
 	}
 
 	pdf, err := p.convertDataToPDF(ctx, data, format)
 	if err != nil {
 		if errors.Is(err, ErrNoLibreOffice) && format.IsOOXML() {
-			if doc, nativeErr := ReadOfficeDocument(data, format); nativeErr == nil {
-				return doc.Text(), nil
+			if text, nativeErr := p.nativeOfficeText(ctx, data, format); nativeErr == nil {
+				return text, nil
 			}
 		}
 		return "", err
 	}
 	return p.extractPDFText(ctx, pdf, opt)
+}
+
+// nativeOfficeText reads an OOXML package under the same deadline as every
+// other document operation. Reading a package is pure CPU and memory, and a
+// large one can take long enough that a caller who set a timeout meant it.
+func (p *Parser) nativeOfficeText(ctx context.Context, data []byte, format Format) (string, error) {
+	return bounded(ctx, p, func(context.Context) (string, error) {
+		doc, err := ReadOfficeDocument(data, format)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
+	})
 }

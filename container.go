@@ -35,6 +35,61 @@ type ChildRequest struct {
 	MaxBytes int64
 }
 
+// childBudget is what a container may still unpack, tracked so that "nothing
+// left" stays distinguishable from "no limit set" — a spent budget read as
+// unlimited is the same bug as having no budget at all.
+type childBudget struct {
+	limitFiles, limitBytes bool
+	files                  int
+	bytes                  int64
+}
+
+func newChildBudget(req ChildRequest) *childBudget {
+	b := &childBudget{}
+	if req.MaxFiles > 0 {
+		b.limitFiles, b.files = true, req.MaxFiles
+	}
+	if req.MaxBytes > 0 {
+		b.limitBytes, b.bytes = true, req.MaxBytes
+	}
+	return b
+}
+
+// room reports how many bytes may still be read, capped at most, and whether
+// there is room for another file at all.
+func (b *childBudget) room(most int64) (int64, bool) {
+	if b.limitFiles && b.files <= 0 {
+		return 0, false
+	}
+	if !b.limitBytes {
+		return most, true
+	}
+	if b.bytes <= 0 {
+		return 0, false
+	}
+	return min(b.bytes, most), true
+}
+
+// spend records a child that was taken.
+func (b *childBudget) spend(size int64) {
+	b.files--
+	b.bytes -= size
+}
+
+// fits reports whether a size declared by a document fits what is left of the
+// budget. Declared sizes are unsigned and untrusted; the budget never is.
+func (b *childBudget) fits(size uint64, limit int64) bool {
+	// #nosec G115 -- limit comes from room, which returns a positive number
+	// or reports that there is no room at all.
+	return limit > 0 && size <= uint64(limit)
+}
+
+// exceeded is the error a container reports for a child it found but did not
+// take, so the file stays visible in the tree.
+func (b *childBudget) exceeded() error {
+	return fmt.Errorf("parserails: extraction stopped: the walk's remaining budget is spent")
+}
+
 // Container yields the files embedded in a document.
 //
 // Implement it to teach ParseRails a container it does not know — a custom
@@ -246,10 +301,18 @@ func (w *walker) children(ctx context.Context, container Container, node *Node, 
 	req := ChildRequest{
 		Name:     node.Name,
 		Password: w.opt.Password,
-		MaxBytes: w.remaining,
 	}
+	// Zero means "no limit" in the contract, so an exhausted budget has to
+	// stop the walk here rather than be passed on as no limit at all.
+	if w.remaining <= 0 {
+		return nil, fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")
+	}
+	req.MaxBytes = w.remaining
 	if w.maxFiles > 0 {
-		req.MaxFiles = max(w.maxFiles-w.files, 0)
+		if w.files >= w.maxFiles {
+			return nil, fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+		}
+		req.MaxFiles = w.maxFiles - w.files
 	}
 	return bounded(ctx, w.parser, func(ctx context.Context) ([]Child, error) {
 		return container.Children(ctx, data, req)
@@ -279,12 +342,12 @@ func (w *walker) read(ctx context.Context, node *Node, data []byte) {
 		}
 		node.Text = text
 	case node.Format.IsOOXML() && w.parser.nativeOffice:
-		office, err := ReadOfficeDocument(data, node.Format)
+		text, err := w.parser.nativeOfficeText(ctx, data, node.Format)
 		if err != nil {
 			node.Err = err
 			return
 		}
-		node.Text = office.Text()
+		node.Text = text
 	case node.Format == FormatPDF, node.Format.IsOffice(),
 		node.Format.IsImage() && w.parser.hasOCR():
 		opt := w.opt.ReadOptions
@@ -297,8 +360,8 @@ func (w *walker) read(ctx context.Context, node *Node, data []byte) {
 		// A missing LibreOffice is a missing dependency, not a broken
 		// document: an OOXML package can still be read without it.
 		if errors.Is(err, ErrNoLibreOffice) && node.Format.IsOOXML() {
-			if office, nativeErr := ReadOfficeDocument(data, node.Format); nativeErr == nil {
-				node.Text = office.Text()
+			if text, nativeErr := w.parser.nativeOfficeText(ctx, data, node.Format); nativeErr == nil {
+				node.Text = text
 				return
 			}
 		}

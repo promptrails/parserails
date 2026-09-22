@@ -51,22 +51,18 @@ func zipEntries(data []byte, req ChildRequest, keep func(string) bool) ([]Child,
 		return nil, fmt.Errorf("parserails: read zip: %w", err)
 	}
 
-	remaining := req.MaxBytes
+	budget := newChildBudget(req)
 	var out []Child
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() || !keep(f.Name) {
 			continue
 		}
-		if req.MaxFiles > 0 && len(out) >= req.MaxFiles {
-			out = append(out, Child{Name: f.Name,
-				Err: fmt.Errorf("parserails: extraction stopped: more files than the limit allows")})
+		limit, ok := budget.room(maxChildBytes)
+		if !ok {
+			out = append(out, Child{Name: f.Name, Err: budget.exceeded()})
 			break
 		}
 
-		limit := int64(maxChildBytes)
-		if remaining > 0 && remaining < limit {
-			limit = remaining
-		}
 		body, err := readZipFile(f, limit)
 		switch {
 		case err != nil:
@@ -78,9 +74,7 @@ func zipEntries(data []byte, req ChildRequest, keep func(string) bool) ([]Child,
 				Err: fmt.Errorf("parserails: entry is larger than the remaining %d byte budget", limit)})
 			continue
 		}
-		if remaining > 0 {
-			remaining -= int64(len(body))
-		}
+		budget.spend(int64(len(body)))
 		out = append(out, Child{Name: f.Name, Data: body})
 	}
 	return out, nil
@@ -133,6 +127,7 @@ func (c pdfContainer) Children(_ context.Context, data []byte, req ChildRequest)
 		return nil, fmt.Errorf("parserails: attachment count: %w", err)
 	}
 
+	budget := newChildBudget(req)
 	var out []Child
 	for i := 0; i < count.AttachmentCount; i++ {
 		att, err := inst.FPDFDoc_GetAttachment(&requests.FPDFDoc_GetAttachment{
@@ -147,12 +142,28 @@ func (c pdfContainer) Children(_ context.Context, data []byte, req ChildRequest)
 		}); err == nil && got.Name != "" {
 			name = got.Name
 		}
+
+		limit, ok := budget.room(maxChildBytes)
+		if !ok {
+			out = append(out, Child{Name: name, Err: budget.exceeded()})
+			break
+		}
+		// PDFium hands over the whole attachment at once, so the budget is
+		// checked against what came back rather than before reading it. The
+		// oversized copy is dropped here instead of being carried into the
+		// walk and parsed.
 		file, err := inst.FPDFAttachment_GetFile(&requests.FPDFAttachment_GetFile{
 			Attachment: att.Attachment,
 		})
 		if err != nil || len(file.Contents) == 0 {
 			continue
 		}
+		if int64(len(file.Contents)) > limit {
+			out = append(out, Child{Name: name,
+				Err: fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)})
+			continue
+		}
+		budget.spend(int64(len(file.Contents)))
 		out = append(out, Child{Name: name, Data: file.Contents})
 	}
 	return out, nil
@@ -162,12 +173,17 @@ func (c pdfContainer) Children(_ context.Context, data []byte, req ChildRequest)
 // emlText.
 type emlContainer struct{}
 
-func (emlContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
+func (emlContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
 	msg, err := mail.ReadMessage(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("parserails: read e-mail: %w", err)
 	}
-	_, attachments, err := walkMailPart(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
+	_, attachments, err := walkMailPart(
+		msg.Header.Get("Content-Type"),
+		msg.Header.Get("Content-Transfer-Encoding"),
+		msg.Body,
+		newChildBudget(req),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -179,14 +195,22 @@ func (emlContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]
 // their own right.
 type oleContainer struct{}
 
-func (oleContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
+func (oleContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
 	f, err := openCFB(data)
 	if err != nil {
 		return nil, err
 	}
 
+	budget := newChildBudget(req)
 	var out []Child
 	for _, s := range f.streams() {
+		limit, ok := budget.room(maxChildBytes)
+		if !ok {
+			break
+		}
+		if !budget.fits(s.Entry.Size, limit) {
+			continue // a stream too large for what is left of the walk
+		}
 		body := f.readStream(s.Entry)
 		if len(body) == 0 {
 			continue
@@ -194,6 +218,7 @@ func (oleContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]
 		name := strings.TrimPrefix(s.Path, "\x01")
 		if strings.Contains(s.Path, "Ole10Native") {
 			if child, ok := parseOle10Native(body); ok {
+				budget.spend(int64(len(child.Data)))
 				out = append(out, child)
 				continue
 			}
@@ -202,6 +227,7 @@ func (oleContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]
 		// property sets) are not embedded files; only take what stands alone.
 		if format := Sniff(body); format == FormatPDF || format.IsOOXML() ||
 			format.IsImage() || format == FormatZIP {
+			budget.spend(int64(len(body)))
 			out = append(out, Child{Name: name + format.Ext(), Data: body})
 		}
 	}

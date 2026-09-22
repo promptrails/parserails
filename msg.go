@@ -27,7 +27,7 @@ const (
 // msgContainer yields an Outlook message's attachments.
 type msgContainer struct{}
 
-func (msgContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]Child, error) {
+func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
 	f, err := openCFB(data)
 	if err != nil {
 		return nil, err
@@ -38,6 +38,7 @@ func (msgContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]
 		data      []byte
 		nested    map[string]string // a message attached to a message
 	}
+	budget := newChildBudget(req)
 	attachments := map[string]*attachment{}
 	for _, s := range f.streams() {
 		storage, prop, found := strings.Cut(s.Path, "/")
@@ -70,7 +71,12 @@ func (msgContainer) Children(_ context.Context, data []byte, _ ChildRequest) ([]
 		}
 		switch id {
 		case msgPropAttachData:
+			limit, ok := budget.room(maxChildBytes)
+			if !ok || !budget.fits(s.Entry.Size, limit) {
+				continue // too large for what is left of the walk
+			}
 			att.data = f.readStream(s.Entry)
+			budget.spend(int64(len(att.data)))
 		case msgPropAttachName:
 			att.name = msgString(f.readStream(s.Entry), kind)
 		case msgPropAttachTag:
