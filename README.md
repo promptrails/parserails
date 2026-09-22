@@ -55,7 +55,25 @@ before you pay for it.
 | Layout blocks as data (`Blocks`) | — | ✅ |
 | Native cgo backend (`-tags parserails_cgo`) | libpdfium | ✅ |
 
+## Choose the right entry point
+
+| Task | Go | CLI |
+|---|---|---|
+| PDF/Office/image text with coordinates | `ParseData`, `ParseFile` | `parse --format json` |
+| PDF text layer only, without OCR | `ExtractText`, `ExtractTextData` | — |
+| Headings, tables and lists | `Document.Markdown`, `Document.Blocks` | `parse --format markdown` |
+| DOCX/XLSX/PPTX structure without LibreOffice | `ReadOfficeDocument` | `parse --native-office --format markdown` |
+| Archives, emails and embedded attachments | `Extract`, `ExtractFile` | `extract` |
+| Independent files in a batch | `ParseFiles` | `batch` |
+| OCR candidates and page screenshots | `Inspect`, `RenderPage` | `is-complex`, `render` |
+
+For a complete walkthrough with runnable Go code, start with the
+[Usage Guide](./docs/usage-guide.md). The [CLI reference](./docs/cli.md) lists
+flags and exit codes.
+
 ## Install
+
+Requires **Go 1.27 or later**.
 
 As a library:
 
@@ -79,9 +97,19 @@ parserails render     --dpi 150 doc.pdf          # page 0 → doc-p0.png
 curl -sL https://example.com/report.pdf | parserails parse -
 ```
 
-No system dependencies for PDF. PDFium ships as a WASM module loaded at runtime
-via wazero. Office formats need `libreoffice`/`soffice` on PATH; OCR needs the
-`tesseract` binary (only when enabled).
+No system dependencies for PDF or native DOCX/XLSX/PPTX text reading. Office
+**page layout and word boxes** need `libreoffice`/`soffice` on PATH. OCR needs
+the `tesseract` binary or a configured HTTP OCR server.
+
+`@latest` installs a published version. To test the code in a local checkout:
+
+```bash
+go build -o ./bin/parserails ./cmd/parserails
+./bin/parserails parse --native-office --format markdown report.docx
+```
+
+Place CLI flags before positional arguments. `--pages` selections are 1-based;
+`render --page` and result page indexes are 0-based.
 
 ## Usage
 
@@ -103,7 +131,10 @@ func main() {
 	}
 	defer p.Close()
 
-	pdf, _ := os.ReadFile("invoice.pdf")
+	pdf, err := os.ReadFile("invoice.pdf")
+	if err != nil {
+		panic(err)
+	}
 
 	doc, err := p.Parse(context.Background(), pdf)
 	if err != nil {
@@ -151,8 +182,10 @@ for _, b := range doc.Blocks() {
 }
 ```
 
-Every block carries the box it came from, so a heading or a single table cell
-maps back to the region of the page it was read from. See
+For PDF-derived blocks, Go coordinate fields map a heading or table cell back
+to the page. Use `WithFontInfo()` and `WithImages()` to supply heading metrics
+and figure regions; the CLI enables these for Markdown automatically. Figure
+links are placeholders, not image files written to disk. See
 [docs/markdown.md](./docs/markdown.md).
 
 ## Does it need OCR?
@@ -171,14 +204,27 @@ or price a batch for a fraction of a parse. See
 ## Files inside files
 
 ```go
-node, _ := p.ExtractFile(ctx, "bundle.zip", parserails.ExtractOptions{})
+node, err := p.ExtractFile(ctx, "bundle.zip", parserails.ExtractOptions{
+	MaxFiles: 100,
+	MaxBytes: 64 << 20,
+})
+if err != nil {
+	panic(err)
+}
+node.Walk(func(n *parserails.Node) {
+	if n.Err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", n.Name, n.Err)
+	}
+})
 fmt.Println(node.AllText())
 ```
 
 PDF attachments, ZIP entries, e-mail and Outlook attachments, OLE objects
 embedded in office documents — recursively, bounded by depth, file count and
 unpacked bytes. One unreadable file is recorded on its own node instead of
-failing the walk. See [docs/containers.md](./docs/containers.md).
+failing the walk. Check every `Node.Err` before treating the result as complete.
+`Extract` returns an inventory/text tree; it does not save the original
+attachment files. See [docs/containers.md](./docs/containers.md).
 
 ## OCR (pluggable)
 
@@ -220,6 +266,9 @@ several times cheaper than `Parse`:
 text, _ := p.ExtractText(ctx, pdf)        // plain string, no boxes
 text, _ = p.ExtractFileText(ctx, "x.docx") // PDF or office doc
 ```
+
+The PDF fast path never runs OCR, even with `WithOCR` configured. Use
+`Parse`/`ParseData` for scanned PDFs and call `doc.Text()` on the result.
 
 ## Backends: WASM (default) vs. native cgo
 
@@ -267,14 +316,39 @@ doc, _ := p.ParseFile(ctx, "report.docx")           // PDF or office doc
 results := p.ParseFiles(ctx, paths, 4)               // concurrent batch
 ```
 
-`ParseFile` converts office documents to PDF via LibreOffice, then parses.
-`ParseFiles` runs a bounded-concurrency batch and captures per-file errors.
+`ParseFile` converts Office documents to PDF via LibreOffice, then parses.
+`ParseFiles` captures errors in each `FileResult` and preserves input order;
+pass a positive concurrency value. `WithNativeOffice` applies to text
+extraction and the container walk, not these spatial APIs.
+
+For CLI input discovery, output collisions, retries and examples, see
+[Batch Processing](./docs/batch.md).
+
+## Limits and partial results
+
+Extraction defaults to depth 8, 512 file attempts and 256 MiB of content,
+including the root. `MaxBytes` is not a process memory cap: PDFium materializes
+PDF attachments before their sizes can be checked. `WithTimeout` stops the
+caller waiting for an operation but cannot kill an in-progress PDFium call.
+Use a context deadline for a whole request spanning multiple operations.
+
+CLI `extract` can exit successfully with errors on individual nodes. Use tree
+or JSON output when completeness matters; text output alone omits those errors.
+See [Limits & Timeouts](./docs/limits.md) for accounting, cancellation and native
+Office timeout scope.
 
 ## Documentation
 
-Full docs live in [`docs/`](./docs) — start at
-[Getting Started](./docs/getting-started.md), or jump to the
-[API Reference](./docs/api.md) for every exported name in one place.
+Full documentation lives in [`docs/`](./docs):
+
+- [Getting Started](./docs/getting-started.md) and [Usage Guide](./docs/usage-guide.md) — installation and complete workflows.
+- [CLI](./docs/cli.md) and [API Reference](./docs/api.md) — commands, flags, options and result types.
+- [OCR](./docs/ocr.md), [Native Office](./docs/office.md), [Containers](./docs/containers.md) and [Batch Processing](./docs/batch.md) — format-specific usage.
+- [Limits & Timeouts](./docs/limits.md) and [Troubleshooting](./docs/troubleshooting.md) — quotas, partial results and operational behavior.
+
+The documentation site deploys from `main`. Feature-branch pages can be read
+in the checkout or previewed locally as described in
+[Troubleshooting](./docs/troubleshooting.md).
 
 ## Agent skill
 

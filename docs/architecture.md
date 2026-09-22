@@ -44,10 +44,8 @@ Use the default everywhere for portability; switch to the cgo backend on
 performance-critical, controlled hosts (e.g. a Dockerized ingestion worker) where
 installing libpdfium is fine and throughput matters.
 
-> The cgo backend pulls extra modules (`hashicorp/go-plugin`, `go-hclog`) used
-> only under the build tag. A plain `go mod tidy` evaluates default tags and will
-> prune them; if you tidy, restore with
-> `go get github.com/hashicorp/go-hclog github.com/hashicorp/go-plugin`.
+The native backend also needs the native PDFium build dependencies. See the
+[`native-cgo` example](examples.md) for a working application and Dockerfile.
 
 ## The pool
 
@@ -92,7 +90,7 @@ library polls a cancellation signal, so a `context` deadline alone does
 nothing once a call is inside the engine: a pathological document can occupy a
 worker indefinitely, and in a pool of four, four of them stop the process.
 
-`WithTimeout` bounds each document instead:
+`WithTimeout` bounds how long the caller waits for each internal operation:
 
 ```go
 p, _ := parserails.New(parserails.WithTimeout(30 * time.Second))
@@ -100,9 +98,10 @@ p, _ := parserails.New(parserails.WithTimeout(30 * time.Second))
 
 Each operation runs on its own goroutine and the caller stops waiting when the
 deadline passes, returning `document timed out after 30s`. The abandoned
-worker is not killed — it cannot be — but it does finish, close its instance
-and return it to the pool. It is a worker that is busy for too long, not a
-leak, and the pipeline keeps moving while one bad document finishes dying.
+worker is not killed. If the engine call returns, cleanup releases the instance
+back to the pool. A pathological call can remain busy indefinitely, and enough
+such calls can exhaust the pool. Use process isolation when hard termination
+is a requirement.
 
 A caller's own `context` deadline is enforced the same way, whichever is
 earlier, and with no timeout configured at all the operation runs inline with
@@ -111,9 +110,14 @@ mean nothing enforced it: the engine never looks at the context once a call is
 under way.
 
 What is covered: PDF parsing, text extraction, complexity inspection,
-rendering, image OCR, LibreOffice conversion, and container enumeration.
+rendering, image OCR, LibreOffice conversion, parser-managed native Office
+text reading, and container enumeration.
 LibreOffice is the one that can really be killed — it is a subprocess, so a
 stuck conversion dies rather than being abandoned.
 
 The same value also caps how long a call waits for a free worker, so a tight
-deadline is not spent queueing behind other documents.
+deadline is not spent queueing behind other documents. Multiple operations in
+one request can each use that timeout; pass a context deadline for a total
+request budget. File I/O and direct `ReadOfficeDocument` calls are not covered
+by this wrapper. See [Limits & Timeouts](limits.md), including CLI native-Office
+behavior and extraction memory limits.

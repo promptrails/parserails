@@ -25,6 +25,11 @@ Every command that takes an input file accepts `-` for standard input:
 curl -sL https://example.com/report.pdf | parserails parse -
 ```
 
+Flags must precede positional arguments: `parserails parse --format json file.pdf`.
+`--help` displays the flags for one command. `@latest` is a published version;
+use `go build -o ./bin/parserails ./cmd/parserails` to test a local checkout.
+The [Usage Guide](usage-guide.md) combines commands into complete workflows.
+
 ## Shared flags
 
 `parse`, `batch` and `extract` share the flags that open a document:
@@ -37,7 +42,7 @@ curl -sL https://example.com/report.pdf | parserails parse -
 | `--image-ocr` | off | also [read figures](ocr.md) on pages that have text |
 | `--native-office` | off | read [DOCX/XLSX/PPTX natively](office.md), without LibreOffice (text and Markdown output only) |
 | `--password` | — | password for encrypted documents |
-| `--timeout` | `0` | give up on a document after this long |
+| `--timeout` | `0` | per-operation timeout, e.g. `30s`; zero adds no limit — [scope and native-path exception](limits.md) |
 
 ## parse
 
@@ -66,8 +71,9 @@ since heading ranking and figure placement need them. See
 [Blocks & Markdown](markdown.md).
 
 `--native-office` applies to `--format text` and `--format markdown`, where no
-page layout is needed. `--format json` reports word boxes, which only exist
-once a page has been laid out, so it still needs LibreOffice and says so.
+page layout is needed. Combining `parse --native-office --format json` for
+OOXML is an error: word boxes require LibreOffice, so drop `--native-office`
+for JSON. Native output does not apply `--pages` or `--max-pages`.
 
 ## batch
 
@@ -88,13 +94,20 @@ parserails batch --ext .pdf --recursive=false ./inbox ./out
 | `--concurrency` | CPU count | documents parsed at once |
 | `-q` | off | only report failures |
 
+Input discovery accepts PDF, Office and image extensions; it skips ZIP, email
+and plain text. There are no batch `--pages` or `--max-pages` flags. With
+`--native-office --format json`, batch uses spatial parsing and still requires
+LibreOffice.
+
 A document that fails is reported on stderr and the batch continues; the exit
 status is non-zero if any failed.
 
 Output names mirror the input tree with the extension replaced. Two inputs
 that would collide — `report.pdf` and `report.docx` in one directory both want
 `report.txt` — keep their extension instead (`report.pdf.txt`,
-`report.docx.txt`), so neither silently overwrites the other.
+`report.docx.txt`), so neither silently overwrites the other within that run.
+Further collisions receive numeric suffixes. Existing destination files from
+previous runs may be overwritten. See [Batch Processing](batch.md).
 
 ## extract
 
@@ -112,6 +125,15 @@ parserails extract --format json --list a.zip  # inventory, nothing parsed
 | `--max-depth` | `8` | how deep to descend (`-1` = no limit) |
 | `--max-files` | `512` | cap how many files are opened |
 | `--list` | off | inventory only; do not parse the documents |
+
+`extract` emits a tree or recovered text; it does not save attachment files.
+`--list` still unpacks containers, but skips parsing the documents they hold.
+There is no CLI `--max-bytes` flag; the walk uses the library's 256 MiB default.
+Set `ExtractOptions.MaxBytes` in Go when you need a different byte budget.
+
+Node errors are included in tree/JSON output, and do not necessarily make the
+command exit nonzero. Inspect them when completeness matters. Plain-text output
+contains recovered content without an error report. See [Limits & Timeouts](limits.md).
 
 ## render
 

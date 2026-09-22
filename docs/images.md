@@ -28,6 +28,10 @@ There is no page here, so the "page" is the image: `Page.Width` and
 flip to a bottom-left origin, so image words obey the same convention as PDF
 words and the same downstream code reads both.
 
+The decoder reads one frame. Animated GIFs and multi-page TIFFs are not expanded
+into a page sequence. Image dimensions are checked before pixel allocation;
+see [Limits & Timeouts](limits.md) for the current pixel cap.
+
 ## Without OCR
 
 `ParseImage` needs an OCR backend and says so rather than returning an empty

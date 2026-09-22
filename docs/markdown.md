@@ -100,6 +100,15 @@ the block sequence by vertical position — the text blocks themselves are never
 reordered, so columns stay in reading order and a page selection stays in the
 order it was asked for.
 
+Figure files are not saved by `Markdown()` or the CLI. Render/crop the regions
+and provide the referenced assets separately. Figures inside nested PDF Form
+XObjects are included in image enumeration when the engine exposes them.
+
+Block and cell boxes are Go fields but have `json:"-"` tags. Serializing
+`doc.Blocks()` therefore does not export their coordinates; define an explicit
+response type if you need them. CLI `--format json` serializes `Document`,
+not this block representation.
+
 ## Running headers and footers
 
 A line that repeats at the top or bottom of most pages is furniture, not

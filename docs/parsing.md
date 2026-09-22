@@ -144,8 +144,9 @@ use [Markdown output](markdown.md) when column structure matters, or
 
 ## Read options: passwords and page ranges
 
-Every in-memory entry point takes a `ReadOptions`, so one `Parser` can serve
-documents with different passwords and page selections concurrently.
+`ParseData`, `ExtractTextData` and `Inspect` take `ReadOptions`, so one `Parser`
+can serve documents with different passwords and page selections concurrently.
+`Parse` and `ExtractText` use parser defaults; `RenderPage` has `RenderRequest`.
 
 ```go
 doc, err := p.ParseData(ctx, data, parserails.ReadOptions{

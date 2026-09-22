@@ -6,7 +6,15 @@ carries its XML inside the PDF. `Extract` walks all of it.
 
 ```go
 node, err := p.ExtractFile(ctx, "bundle.zip", parserails.ExtractOptions{})
-fmt.Println(node.AllText()) // everything, depth first
+if err != nil {
+	return err
+}
+node.Walk(func(n *parserails.Node) {
+	if n.Err != nil {
+		log.Printf("%s: %v", n.Name, n.Err)
+	}
+})
+fmt.Println(node.AllText()) // recovered text, depth first
 ```
 
 ```bash
@@ -20,6 +28,9 @@ bundle.zip  [zip]
   invoice.pdf  [pdf]  1 page(s)
   notes.txt  [txt]  10 char(s)
 ```
+
+`Extract` returns text and an inventory tree; it does not write the original
+attachment bytes to disk. For an end-to-end example, see the [Usage Guide](usage-guide.md).
 
 ## What gets unpacked
 
@@ -75,7 +86,7 @@ enormously, and can contain themselves.
 > piece, with no way to ask its size first, so a PDF attachment is measured
 > after it has been materialized. It is reported and dropped rather than
 > parsed, but a single enormous attachment is held in memory once before that
-> happens. Everything else is bounded before it is read.
+> happens. The byte budget is not a process memory cap; see [Limits & Timeouts](limits.md).
 
 Every reader enforces the budget — ZIP entries, PDF attachments, MIME parts,
 OLE and Outlook streams — and an exhausted budget stops the walk rather than
@@ -91,28 +102,76 @@ otherwise allocate 64 GiB before anything checked the total. An entry that
 would exceed what is left is reported as a node with an `Err`, so it is
 visible rather than silently missing.
 
-`SkipParse: true` collects the tree without parsing anything, which is much
-cheaper when you only want an inventory.
+The root consumes a file slot and its byte length. Container bytes and their
+unpacked children both count. A node at `MaxDepth` is read but its children are
+not enumerated; reaching that depth does not add an error marker. Stop notices
+can make `Node.Count()` larger than `MaxFiles`. Identical bytes anywhere in the
+walk are parsed only once, even when their names differ.
 
-## Teaching it a new container
+`SkipParse: true` collects the tree without parsing document text. Containers
+are still opened and decompressed to find descendants; it is not a metadata-only
+archive scan. See [Limits & Timeouts](limits.md) for defaults, deadline scope,
+and partial-result semantics.
+
+## Email and Outlook details
+
+EML body text is recorded on the parent node and attachments become children.
+MIME base64 and quoted-printable attachments are budgeted after decoding.
+Multipart bodies, including forwarded `message/rfc822` attachments, are walked
+recursively. An attachment that exceeds the budget is reported rather than
+returned as truncated data.
+
+MSG headers/body become the parent text. Binary attachments retain their names;
+a message attached as an embedded Outlook storage becomes a `.txt` child with
+its rendered headers and body. It is not reconstructed into another MSG file.
+One embedded message consumes one file slot, and its emitted text is charged
+once, including headers and separators. UTF-16 property storage can be larger
+than that output, so encoded reads are bounded separately.
+
+MSG attachments are processed in storage-name order with one shared budget.
+When the quota is spent, later attachments are not read; a stop notice is
+included. Actual failed attempts still consume a file slot. The final children
+are sorted by display name, which may differ from their processing order.
+
+## Handling errors
+
+The returned error covers call-level failures such as an already-canceled
+context. Individual parse, container and quota failures usually live on
+`Node.Err`, including errors on the root. Walk the tree before treating it as
+complete. `AllText()` omits the error report, and CLI extraction may exit zero
+with node errors. Images without OCR and unsupported leaf formats can be present
+as inventory nodes without text or an error.
+
+JSON includes each node's error under `error`; rejected children may have
+`format: "unknown"` because their content was never inspected.
+
+## Replacing a container reader
 
 ```go
-type tarContainer struct{}
+type skipAttachments struct{}
 
-func (tarContainer) Children(
+func (skipAttachments) Children(
 	ctx context.Context, data []byte, req parserails.ChildRequest,
 ) ([]parserails.Child, error) {
-	// One level only: ParseRails walks the tree itself. Stay inside
-	// req.MaxFiles and req.MaxBytes — what is left of the walk's budget —
-	// and report what you skipped as a Child with an Err. req.Password is
-	// the password this read was opened with, for containers that need it.
+	return nil, nil // example: keep the parent, skip all embedded files
 }
 
-p, _ := parserails.New(parserails.WithContainer(parserails.FormatZIP, tarContainer{}))
+p, err := parserails.New(
+	parserails.WithContainer(parserails.FormatPDF, skipAttachments{}),
+)
 ```
 
-`WithContainer` also replaces a built-in one — or, with a container that
-returns nothing, switches unpacking off for a format.
+`WithContainer` registers a reader for a detected format, replacing its
+built-in reader. The example disables unpacking PDF attachments. This registry
+does not add new magic-byte detection or filename extensions.
+
+A reader returns one level only; ParseRails handles recursion. Enforce
+`req.MaxFiles` and `req.MaxBytes` **before** reading children, since the walker
+can only account for allocations after `Children` returns. Zero means no limit
+in this request type. Honor `ctx` and `req.Password` where applicable, and
+report an attempted but refused child with `Child.Err`. Stop after exhausting
+the budget instead of returning one ordinary error per unattempted entry;
+ordinary child errors consume global file slots.
 
 ```go
 type Container interface {

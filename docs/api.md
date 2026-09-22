@@ -1,7 +1,8 @@
 # API Reference
 
-Everything ParseRails exports, grouped by what you are trying to do. Each entry
-links to the page that explains it properly.
+Public entry points and core types, grouped by task. Start with the
+[Usage Guide](usage-guide.md) for complete workflows; use the Go package
+reference for individual method signatures.
 
 ## Creating a parser
 
@@ -25,7 +26,7 @@ defer p.Close()
 | `WithNativeOffice()` | read OOXML without LibreOffice — [office](office.md) |
 | `WithLibreOffice(path)` | explicit `soffice` binary |
 | `WithContainer(Format, Container)` | teach or replace a container — [containers](containers.md) |
-| `WithTimeout(time.Duration)` | bound each document — [architecture](architecture.md) |
+| `WithTimeout(time.Duration)` | bound individual operations — [limits](limits.md) |
 | `WithPoolSize(min, maxIdle, maxTotal)` | tune the PDFium pool |
 
 `Backend` is a constant naming the active engine: `"wasm"` or `"cgo"`.
@@ -35,12 +36,12 @@ defer p.Close()
 | Call | Returns | Use for |
 |------|---------|---------|
 | `Parse(ctx, pdf)` | `*Document` | PDF bytes, parser defaults |
-| `ParseData(ctx, data, ReadOptions)` | `*Document` | any format, detected from the bytes |
+| `ParseData(ctx, data, ReadOptions)` | `*Document` | PDF, Office, or image input, detected from the bytes |
 | `ParseFile(ctx, path)` | `*Document` | a path (office documents converted) |
-| `ParseFiles(ctx, paths, concurrency)` | `[]FileResult` | a bounded concurrent batch |
+| `ParseFiles(ctx, paths, concurrency)` | `[]FileResult` | a concurrent batch; set positive concurrency — [batch](batch.md) |
 | `ParseImage(ctx, data)` | `*Document` | a scan or photo, via OCR — [images](images.md) |
-| `ExtractText(ctx, pdf)` | `string` | text only, several times cheaper |
-| `ExtractTextData(ctx, data, ReadOptions)` | `string` | text only, any format |
+| `ExtractText(ctx, pdf)` | `string` | PDF text layer only; no OCR |
+| `ExtractTextData(ctx, data, ReadOptions)` | `string` | PDF/Office text, or image OCR; not ZIP/email |
 | `ExtractFileText(ctx, path)` | `string` | text only, from a path |
 | `RenderPage(ctx, pdf, RenderRequest)` | `image.Image` | a page raster — [screenshots](screenshots.md) |
 | `Inspect(ctx, data, ReadOptions)` / `InspectFile` | `*Complexity` | does this need OCR? — [complexity](complexity.md) |
@@ -54,19 +55,23 @@ embeds it and adds `MaxDepth`, `MaxFiles`, `MaxBytes`, `SkipParse`.
 
 | Type | Is |
 |------|----|
-| `Document` | `Pages`; `Words()`, `Lines()`, `Text()`, `Blocks()`, `Markdown()` |
+| `Document` | `Pages`; `Words()`, `Lines()`, `Text()`, `Blocks()`, `BlocksWith()`, `Markdown()`, `MarkdownWith()` |
 | `Page` | `Index`, `Width`, `Height`, `Words`, `Images`; `Lines()`, `Text()` |
 | `Word` | `Text`, `Page`, `X0,Y0,X1,Y1`, `FontSize`, `Confidence`; `IsOCR()` |
 | `Line` | a reconstructed line: box, `Words`; `Text()`, `Height()`, `FontSize()` |
 | `Block` | a classified region — [blocks & Markdown](markdown.md) |
 | `BlockKind` | `BlockHeading`, `BlockParagraph`, `BlockListItem`, `BlockTable`, `BlockFigure` |
+| `BlockOptions` | `KeepHeadersFooters`, used by `BlocksWith` and `MarkdownWith` |
 | `Cell` | a table cell: `Text` plus its own box |
 | `ImageRegion` | a raster figure on a page: `Index`, box, `Area()` |
 | `Complexity` / `PageComplexity` | the OCR verdict, with `Reasons` |
-| `Node` | one file in an extraction tree: `Document`, `Text`, `Children`, `Err` |
+| `Node` | one file in an extraction tree: `Document`, `Text`, `Children`, `Err`; `Walk`, `AllText`, `Count` |
 | `OfficeDocument` | an OOXML package read natively: `Blocks`; `Text()`, `Markdown()` |
 
-Coordinates are PDF points with a bottom-left origin, everywhere.
+PDF and converted Office coordinates are points with a bottom-left origin.
+Standalone image coordinates are pixels with a bottom-left origin. Native
+`OfficeDocument` blocks have no page geometry. `Block` and `Cell` coordinates
+are omitted by their default JSON encoding.
 
 ## Formats
 
@@ -74,7 +79,7 @@ Coordinates are PDF points with a bottom-left origin, everywhere.
 parserails.Sniff(data)              // content only
 parserails.Detect(name, data)       // content, name as tiebreaker
 parserails.FormatByName("a.docx")   // name only
-parserails.IsOfficeFormat(path)     // does this need LibreOffice?
+parserails.IsOfficeFormat(path)     // is this an Office file extension?
 ```
 
 `Format` has `IsImage()`, `IsOffice()`, `IsOOXML()`, `Ext()`, `String()`, and
@@ -106,4 +111,7 @@ errors.Is(err, parserails.ErrNoLibreOffice) // the binary is missing, the docume
 ```
 
 Encrypted documents fail with `document is encrypted` or `wrong password`; a
-document over `WithTimeout` fails with `document timed out after …`.
+document operation over `WithTimeout` fails with `document timed out after …`.
+There is no exported timeout or quota-error sentinel. `Extract` may return a
+tree with errors on individual nodes even when its returned error is nil;
+always inspect `Node.Err`. See [Limits & Timeouts](limits.md).

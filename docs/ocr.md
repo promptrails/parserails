@@ -121,6 +121,23 @@ OCR call per substantial figure. It is off by default for that reason.
 Pair it with [`Inspect`](complexity.md), which tells you up front which pages
 carry figures worth reading (`embedded-images`).
 
+## Routing and fast-path differences
+
+`Inspect` reports OCR candidates but does not run OCR or change the fallback
+trigger. Sparse or garbled text can be flagged while still containing native
+words. Automatic whole-page fallback remains limited to pages with zero words.
+If your policy requires recognizing the entire flagged page, render it and
+invoke your backend explicitly.
+
+PDF `ExtractText` / `ExtractTextData` use the text layer without OCR, even when
+`WithOCR` is configured. Use `Parse` / `ParseData` when PDF OCR is required.
+`ExtractTextData` on a standalone image does route through image OCR.
+
+The HTTP adapter's default client timeout is 60 seconds; use `Config.Client`
+to supply another client. The CLI defaults `--lang` to `eng` for both backends,
+whereas a bare `httpocr.Config` defaults to `en`. Pass a language code supported
+by your server. See [Limits & Timeouts](limits.md) for cancellation behavior.
+
 ## Writing your own
 
 Anything that turns an image into positioned words works — a different engine, a

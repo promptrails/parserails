@@ -3,6 +3,7 @@ package parserails
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf16"
 )
@@ -27,24 +28,25 @@ const (
 // msgContainer yields an Outlook message's attachments.
 type msgContainer struct{}
 
-func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) ([]Child, error) {
+// msgPropertyStream describes a property without reading its payload.
+type msgPropertyStream struct {
+	entry cfbEntry
+	kind  string
+}
+
+func (msgContainer) Children(ctx context.Context, data []byte, req ChildRequest) ([]Child, error) {
 	f, err := openCFB(data)
 	if err != nil {
 		return nil, err
 	}
 
 	type attachment struct {
-		name, tag string
-		data      []byte
-		err       error
-		nested    map[string]string // a message attached to a message
-		// nestedBytes is what those properties hold so far. It is counted
-		// here rather than taken from the walk's budget: the message is
-		// charged once, when it is emitted, for the text it emits.
-		nestedBytes int64
+		name, tag msgPropertyStream
+		data      *cfbEntry
+		nested    map[string]msgPropertyStream
 	}
-	budget := newChildBudget(req)
 	attachments := map[string]*attachment{}
+	var order []string
 	for _, s := range f.streams() {
 		storage, prop, found := strings.Cut(s.Path, "/")
 		if !found || !strings.HasPrefix(storage, msgAttachPrefix) {
@@ -52,41 +54,19 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		}
 		att := attachments[storage]
 		if att == nil {
-			att = &attachment{nested: map[string]string{}}
+			att = &attachment{nested: map[string]msgPropertyStream{}}
 			attachments[storage] = att
+			order = append(order, storage)
 		}
-
-		// A property of the attachment itself, or one belonging to a message
-		// attached to it? Everything below the first "/" is the nested
-		// message's own property set, and assigning those to att.data — as a
-		// plain suffix match would — leaves the last nested stream standing
-		// in for the attachment.
 		if inner, deeper := strings.CutPrefix(prop, msgPropPrefix+msgPropAttachData+"000D/"); deeper {
 			id, kind, ok := msgProperty(inner)
-			if !ok {
+			if !ok || strings.Contains(inner, "/") || (kind != "001F" && kind != "001E") {
 				continue
 			}
-			// A forwarded message is an attachment like any other, but it
-			// is assembled from several property streams. They are measured
-			// against the budget as they accumulate and charged to it once,
-			// as one file, when the message is emitted below — charging each
-			// property as it is read would bill the same bytes twice.
-			limit, room := budget.room(maxChildBytes)
-			if !room || !budget.fits(s.Entry.Size, limit) {
-				att.err = fmt.Errorf(
-					"parserails: embedded message is larger than the remaining %d byte budget", limit)
-				continue
+			switch id {
+			case msgPropSubject, msgPropBody, msgPropFrom, msgPropTo:
+				att.nested[id] = msgPropertyStream{s.Entry, kind}
 			}
-			// Each stream fits the budget on its own; what they add up to is
-			// checked here, before another one is kept.
-			text := msgString(f.readStream(s.Entry), kind)
-			if att.nestedBytes+int64(len(text)) > limit {
-				att.err = fmt.Errorf(
-					"parserails: embedded message is larger than the remaining %d byte budget", limit)
-				continue
-			}
-			att.nestedBytes += int64(len(text))
-			att.nested[id] = text
 			continue
 		}
 		if strings.Contains(prop, "/") {
@@ -98,67 +78,103 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		}
 		switch id {
 		case msgPropAttachData:
-			limit, ok := budget.room(maxChildBytes)
-			if !ok {
-				att.err = budget.exceeded()
-				continue
-			}
-			if !budget.fits(s.Entry.Size, limit) {
-				// Recorded, not dropped: an attachment that silently
-				// disappears makes a partial extraction look complete.
-				budget.refuse()
-				att.err = fmt.Errorf(
-					"parserails: attachment is larger than the remaining %d byte budget", limit)
-				continue
-			}
-			att.data = f.readStream(s.Entry)
-			budget.spend(int64(len(att.data)))
+			att.data = &s.Entry
 		case msgPropAttachName:
-			att.name = msgString(f.readStream(s.Entry), kind)
+			att.name = msgPropertyStream{s.Entry, kind}
 		case msgPropAttachTag:
-			att.tag = msgString(f.readStream(s.Entry), kind)
+			att.tag = msgPropertyStream{s.Entry, kind}
 		}
 	}
 
-	out := make([]Child, 0, len(attachments))
-	for storage, att := range attachments {
-		name := firstNonEmpty(att.name, att.tag)
-		switch {
-		case att.err != nil:
-			if name == "" {
-				name = sanitizeChildName(storage)
-			}
-			out = append(out, Child{Name: name, Err: att.err})
-		case len(att.data) > 0:
-			if name == "" {
-				name = sanitizeChildName(storage) + Sniff(att.data).Ext()
-			}
-			out = append(out, Child{Name: sanitizeChildName(name), Data: att.data})
-		case att.err == nil && len(att.nested) > 0:
-			// A forwarded message. Its parts cannot be reassembled into a
-			// .msg, so its text is carried out instead of being lost.
-			if name == "" {
-				name = strings.TrimPrefix(sanitizeChildName(storage), msgAttachPrefix)
-			}
-			name = strings.TrimSuffix(name, ".msg") + ".txt"
-
-			// Rendering adds headers and blank lines, so the budget is
-			// applied to what actually leaves here, not to the properties it
-			// was built from.
-			text := []byte(msgTextFrom(att.nested))
-			limit, room := budget.room(maxChildBytes)
-			if !room || int64(len(text)) > limit {
-				budget.takeFile()
-				out = append(out, Child{Name: name, Err: fmt.Errorf(
-					"parserails: embedded message is larger than the remaining %d byte budget", limit)})
-				continue
-			}
-			budget.spend(int64(len(text)))
-			out = append(out, Child{Name: name, Data: text})
+	// Reserve and finish one attachment before opening the next. Iterating
+	// the map here would make a limited extraction choose random siblings.
+	slices.Sort(order)
+	budget := newChildBudget(req)
+	var out []Child
+	for _, storage := range order {
+		if err := ctx.Err(); err != nil {
+			return out, err
 		}
+		att := attachments[storage]
+		if att.data == nil && len(att.nested) == 0 {
+			continue
+		}
+		limit, room := budget.room(maxChildBytes)
+		if !room {
+			out = append(out, Child{Name: sanitizeChildName(storage), Err: budget.exceeded()})
+			break
+		}
+		budget.takeFile()
+
+		// Names are metadata, not child content. Bound their reads separately
+		// so a short payload can still retain its full attachment name.
+		name, _ := readMSGProperty(f, att.name, 4<<10)
+		tag, _ := readMSGProperty(f, att.tag, 4<<10)
+		child := Child{Name: sanitizeChildName(firstNonEmpty(name, tag, storage))}
+		if att.data != nil {
+			if !budget.fits(att.data.Size, limit) {
+				child.Err = fmt.Errorf("parserails: attachment is larger than the remaining %d byte budget", limit)
+			} else {
+				child.Data = f.readStream(*att.data)
+				if name == "" && tag == "" {
+					child.Name += Sniff(child.Data).Ext()
+				}
+			}
+		} else {
+			if name == "" && tag == "" {
+				child.Name = strings.TrimPrefix(child.Name, msgAttachPrefix)
+			}
+			child.Name = strings.TrimSuffix(child.Name, ".msg") + ".txt"
+			props := map[string]string{}
+			// Only these four properties contribute to the emitted message.
+			// Check the rendered size as they accumulate, including headers.
+			for _, id := range []string{msgPropFrom, msgPropTo, msgPropSubject, msgPropBody} {
+				prop, ok := att.nested[id]
+				if !ok {
+					continue
+				}
+				text, err := readMSGProperty(f, prop, limit)
+				if err != nil {
+					child.Err = err
+					break
+				}
+				props[id] = text
+				if int64(len(msgTextFrom(props))) > limit {
+					child.Err = fmt.Errorf("parserails: embedded message is larger than the remaining %d byte budget", limit)
+					break
+				}
+			}
+			if child.Err == nil {
+				child.Data = []byte(msgTextFrom(props))
+			}
+		}
+		if child.Err == nil {
+			budget.takeBytes(int64(len(child.Data)))
+		}
+		out = append(out, child)
 	}
 	sortChildren(out)
 	return out, nil
+}
+
+// readMSGProperty bounds the encoded read separately from the decoded text.
+// UTF-16 can use two bytes for each output byte; allow its optional string
+// terminator too. The absolute per-stream cap still applies to raw reads.
+func readMSGProperty(f *cfbFile, prop msgPropertyStream, limit int64) (string, error) {
+	rawLimit := limit + 1
+	if prop.kind == "001F" {
+		rawLimit = 2 * (limit + 1)
+	}
+	rawLimit = min(rawLimit, maxChildBytes)
+	// #nosec G115 -- callers pass a positive limit capped at maxChildBytes.
+	if prop.entry.Size > uint64(rawLimit) {
+		return "", fmt.Errorf("parserails: message property exceeds the %d byte read limit", rawLimit)
+	}
+	text := msgString(f.readStream(prop.entry), prop.kind)
+	if int64(len(text)) > limit {
+		return "", fmt.Errorf("parserails: decoded message property exceeds the remaining %d byte budget", limit)
+	}
+	return text, nil
 }
 
 // msgText renders an Outlook message's headers and body as text.
