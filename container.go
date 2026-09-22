@@ -35,6 +35,11 @@ type ChildRequest struct {
 	MaxBytes int64
 }
 
+// errLimitReached marks a child that is not a file at all, but a note that
+// the walk stopped. A file that was tried and refused costs a slot; a note
+// saying there was no slot left must not cost another.
+var errLimitReached = errors.New("parserails: extraction stopped")
+
 // childBudget is what a container may still unpack, tracked so that "nothing
 // left" stays distinguishable from "no limit set" — a spent budget read as
 // unlimited is the same bug as having no budget at all.
@@ -100,7 +105,7 @@ func (b *childBudget) fits(size uint64, limit int64) bool {
 // exceeded is the error a container reports for a child it found but did not
 // take, so the file stays visible in the tree.
 func (b *childBudget) exceeded() error {
-	return fmt.Errorf("parserails: extraction stopped: the walk's remaining budget is spent")
+	return fmt.Errorf("%w: the walk's remaining budget is spent", errLimitReached)
 }
 
 // Container yields the files embedded in a document.
@@ -271,11 +276,11 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 		w.files++
 		w.remaining -= int64(len(data))
 		if w.maxFiles > 0 && w.files > w.maxFiles {
-			node.Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+			node.Err = fmt.Errorf("%w: more than %d files", errLimitReached, w.maxFiles)
 			return node, nil
 		}
 		if w.remaining < 0 {
-			node.Err = fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")
+			node.Err = fmt.Errorf("%w: unpacked size limit reached", errLimitReached)
 			return node, nil
 		}
 	}
@@ -310,20 +315,26 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 	if w.maxFiles > 0 {
 		granted = max(w.maxFiles-w.files, 0)
 	}
-	kept := 0
+	used := 0
 	for i := range children {
 		if children[i].Err != nil {
-			continue // a refusal costs nothing to hold
-		}
-		if kept >= granted {
-			children[i].Data = nil
-			children[i].Err = fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)
+			// A file that was opened and refused — corrupt, or too large —
+			// spends a slot like any other attempt. A note that the walk has
+			// stopped is not an attempt.
+			if !errors.Is(children[i].Err, errLimitReached) {
+				used++
+			}
 			continue
 		}
-		kept++
+		if used >= granted {
+			children[i].Data = nil
+			children[i].Err = fmt.Errorf("%w: more than %d files", errLimitReached, w.maxFiles)
+			continue
+		}
+		used++
 		w.remaining -= int64(len(children[i].Data))
 	}
-	w.files += kept
+	w.files += used
 
 	for _, child := range children {
 		if child.Err != nil {
@@ -354,13 +365,13 @@ func (w *walker) children(ctx context.Context, container Container, node *Node, 
 	// read, it is its contents that were not.
 	if w.remaining <= 0 {
 		return []Child{{Name: node.Name + " (contents)",
-			Err: fmt.Errorf("parserails: extraction stopped: unpacked size limit reached")}}, nil
+			Err: fmt.Errorf("%w: unpacked size limit reached", errLimitReached)}}, nil
 	}
 	req.MaxBytes = w.remaining
 	if w.maxFiles > 0 {
 		if w.files >= w.maxFiles {
 			return []Child{{Name: node.Name + " (contents)",
-				Err: fmt.Errorf("parserails: extraction stopped: more than %d files", w.maxFiles)}}, nil
+				Err: fmt.Errorf("%w: more than %d files", errLimitReached, w.maxFiles)}}, nil
 		}
 		req.MaxFiles = w.maxFiles - w.files
 	}

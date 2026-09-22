@@ -38,6 +38,10 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		data      []byte
 		err       error
 		nested    map[string]string // a message attached to a message
+		// nestedBytes is what those properties hold so far. It is counted
+		// here rather than taken from the walk's budget: the message is
+		// charged once, when it is emitted, for the text it emits.
+		nestedBytes int64
 	}
 	budget := newChildBudget(req)
 	attachments := map[string]*attachment{}
@@ -63,17 +67,25 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 				continue
 			}
 			// A forwarded message is an attachment like any other, but it
-			// is assembled from several property streams: each is read
-			// against the budget's bytes, and the file slot is taken once,
-			// for the message, when it is emitted below.
+			// is assembled from several property streams. They are measured
+			// against the budget as they accumulate and charged to it once,
+			// as one file, when the message is emitted below — charging each
+			// property as it is read would bill the same bytes twice.
 			limit, room := budget.room(maxChildBytes)
 			if !room || !budget.fits(s.Entry.Size, limit) {
 				att.err = fmt.Errorf(
 					"parserails: embedded message is larger than the remaining %d byte budget", limit)
 				continue
 			}
+			// Each stream fits the budget on its own; what they add up to is
+			// checked here, before another one is kept.
 			text := msgString(f.readStream(s.Entry), kind)
-			budget.takeBytes(int64(len(text)))
+			if att.nestedBytes+int64(len(text)) > limit {
+				att.err = fmt.Errorf(
+					"parserails: embedded message is larger than the remaining %d byte budget", limit)
+				continue
+			}
+			att.nestedBytes += int64(len(text))
 			att.nested[id] = text
 			continue
 		}

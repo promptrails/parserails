@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -430,6 +431,54 @@ func TestEmbeddedMessageIsBudgetedByWhatItEmits(t *testing.T) {
 		if c.Err == nil {
 			t.Errorf("the refused message should carry a reason: %+v", c)
 		}
+	}
+}
+
+func TestRefusedFilesSpendTheGlobalQuota(t *testing.T) {
+	// The quota covers the root, the inner archive and the entry that was
+	// opened and refused. Nothing is left for what is inside the inner
+	// archive — a refused attempt is still an attempt.
+	p := newTestParser(t)
+	inner := zipArchive(map[string][]byte{"x.txt": []byte("x")})
+	outer := zipArchive(map[string][]byte{
+		"a-inner.zip": inner,
+		"b-big.txt":   make([]byte, 4096),
+	})
+
+	node, err := p.Extract(context.Background(), outer, ExtractOptions{MaxFiles: 3, MaxBytes: 2048})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	attempted := 0
+	node.Walk(func(n *Node) {
+		if n.Err == nil || !errors.Is(n.Err, errLimitReached) {
+			attempted++ // a real file, opened or refused; not a stop notice
+		}
+	})
+	if attempted > 3 {
+		t.Fatalf("touched %d files under a limit of 3:\n%s", attempted, treeSummary(node))
+	}
+}
+
+func TestEmbeddedMessageBytesAreChargedOnce(t *testing.T) {
+	// The output is "Subject: Hi", eleven bytes, and the budget is eleven.
+	// Charging the property it was rendered from as well left nine.
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3701000D", Children: []cfbTestEntry{
+				{Name: "__substg1.0_0037001F", Data: utf16Bytes("Hi")},
+			}},
+		}},
+	})
+	children, err := (msgContainer{}).Children(context.Background(), msg, ChildRequest{MaxBytes: 11})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err != nil {
+		t.Fatalf("children = %+v, want the message accepted", children)
+	}
+	if got := string(children[0].Data); got != "Subject: Hi" {
+		t.Fatalf("data = %q", got)
 	}
 }
 

@@ -147,7 +147,7 @@ func walkMultipart(mr *multipart.Reader, alternative bool, budget *childBudget) 
 
 // errBudgetSpent marks the end of the walk's budget, as opposed to one part
 // being too large for what is left of it.
-var errBudgetSpent = errors.New("parserails: extraction stopped: the walk's remaining budget is spent")
+var errBudgetSpent = fmt.Errorf("%w: the walk's remaining budget is spent", errLimitReached)
 
 // readMailChild reads one part as an embedded file, within the budget.
 //
