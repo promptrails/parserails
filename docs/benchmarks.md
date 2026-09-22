@@ -30,3 +30,26 @@ ParseRails source, so it always benchmarks your working tree.
 
 See [`benchmark/README.md`](https://github.com/promptrails/parserails/tree/main/benchmark)
 for sample inputs, the latest numbers, and licensing notes (unipdf in particular).
+
+## Speed is the easy half
+
+Throughput says nothing about whether the output is usable: a reader that
+returns a flat string beats every structured parser and loses every column,
+table and heading on the way. What matters for a RAG or LLM pipeline is how
+faithfully a document survives conversion, which is scored by public
+doc→Markdown benchmarks against their own ground truth — olmOCR-bench,
+opendataloader-bench and ParseBench.
+
+[`benchmark/quality/`](https://github.com/promptrails/parserails/tree/main/benchmark/quality)
+holds a runner that converts a corpus with this working tree's CLI, ready for
+those harnesses to score:
+
+```bash
+cd benchmark/quality
+./run.sh /path/to/corpus ./out --ocr tesseract
+```
+
+No quality numbers are checked in yet. Publishing a table means running every
+tool at a pinned version on one machine; a table built any other way — mixing
+leaderboard numbers with local runs, or scoring a tuned configuration against
+other tools' defaults — is worse than no table.

@@ -9,11 +9,12 @@ LLM-vision pipeline.
 
 ```go
 type Word struct {
-	Text     string  // the word's text
-	Page     int     // 0-based page index
-	X0, Y0   float64 // lower-left corner
-	X1, Y1   float64 // upper-right corner
-	FontSize float64 // font size in points
+	Text       string  // the word's text
+	Page       int     // 0-based page index
+	X0, Y0     float64 // lower-left corner
+	X1, Y1     float64 // upper-right corner
+	FontSize   float64 // font size in points
+	Confidence float64 // OCR score, 0-1; 0 for native text
 }
 ```
 
@@ -50,6 +51,19 @@ end the current word.
 This keeps extraction faithful to what is actually drawn on the page — no
 heuristic reflow, no guessing.
 
+`Confidence` separates recognized text from extracted text. Text read out of
+the PDF's own text layer is not a guess and carries no score, so it stays `0`;
+anything an OCR backend produced reports what that backend thought of it.
+`word.IsOCR()` is the same test spelled out:
+
+```go
+for _, w := range doc.Words() {
+	if w.IsOCR() && w.Confidence < 0.6 {
+		lowConfidence = append(lowConfidence, w) // flag for review
+	}
+}
+```
+
 > `FontSize` is `0` unless you opt in with `parserails.New(parserails.WithFontInfo())`.
 > Collecting per-character font metrics roughly doubles extraction cost, so it is
 > off by default.
@@ -84,3 +98,104 @@ for _, pg := range doc.Pages {
 		pg.Index, pg.Width, pg.Height, len(pg.Words))
 }
 ```
+
+## Lines and reading order
+
+PDFium reports characters and rectangles — nothing in the stream says where a
+line ends. ParseRails reconstructs lines from the geometry: words are sorted by
+their top edge, then grouped while they share enough of a vertical band, then
+ordered left to right.
+
+```go
+for _, l := range doc.Lines() {
+	fmt.Printf("p%d %q  [%.0f %.0f %.0f %.0f]\n", l.Page, l.Text(), l.X0, l.Y0, l.X1, l.Y1)
+}
+```
+
+```go
+type Line struct {
+	Page           int
+	X0, Y0, X1, Y1 float64 // the union of the words' boxes
+	Words          []Word
+}
+```
+
+| Method | Returns |
+|--------|---------|
+| `doc.Lines()` | every page's lines, in page order |
+| `page.Lines()` | one page's lines |
+| `line.Text()` | the line's words joined with single spaces |
+| `line.Height()` | the line's vertical extent in points |
+| `line.FontSize()` | the line's dominant font size (0 without `WithFontInfo`) |
+
+## Plain text output
+
+`Document.Text()` is built on those lines: lines are joined with `\n` and pages
+separated by a form feed (`\f`).
+
+```go
+text := doc.Text() // "First line\nSecond line\fPage two"
+```
+
+Reading order is top-to-bottom, then left-to-right, across the **whole page
+width**. A two-column page therefore reads line by line across both columns —
+use [Markdown output](markdown.md) when column structure matters, or
+`ExtractText` when you want PDFium's own text order without any reconstruction.
+
+## Read options: passwords and page ranges
+
+`ParseData`, `ExtractTextData` and `Inspect` take `ReadOptions`, so one `Parser`
+can serve documents with different passwords and page selections concurrently.
+`Parse` and `ExtractText` use parser defaults; `RenderPage` has `RenderRequest`.
+
+```go
+doc, err := p.ParseData(ctx, data, parserails.ReadOptions{
+	Name:     "statement.pdf", // format hint, only used when the bytes are ambiguous
+	Password: "hunter2",       // encrypted documents
+	Pages:    "1-5,10",        // 1-based, inclusive, in the order written
+	MaxPages: 20,              // cap applied after Pages
+})
+```
+
+| Field | Meaning |
+|-------|---------|
+| `Name` | file name hint for [format detection](formats.md) |
+| `Password` | opens an encrypted document; defaults to `WithPassword` |
+| `Pages` | 1-based selection like `"1-5,10,15-20"`; empty means all pages |
+| `MaxPages` | caps pages read after `Pages`; defaults to `WithMaxPages`, negative means no cap |
+
+Pages past the end of the document are skipped rather than rejected, so
+`"1-10"` on a 3-page file returns those 3 pages. Selected pages keep their
+**absolute** `Page.Index`, so `doc.Pages[0].Index == 1` after asking for page 2.
+
+Parser-wide defaults:
+
+```go
+p, _ := parserails.New(
+	parserails.WithPassword("hunter2"),
+	parserails.WithMaxPages(50),
+)
+```
+
+An encrypted document opened without a password fails with an error that says
+so (`document is encrypted`), and a wrong password says `wrong password` —
+rather than surfacing PDFium's numeric code. `RenderPage` takes the password
+too, via `RenderRequest.Password`.
+
+## Figures on a page
+
+`Page.Images` lists the raster figures PDFium reports, each an `ImageRegion`
+with its box in the same coordinates:
+
+```go
+p, _ := parserails.New(parserails.WithImages())
+doc, _ := p.Parse(ctx, pdf)
+
+for _, img := range doc.Pages[0].Images {
+	fmt.Printf("figure %d covers %.0f square points\n", img.Index, img.Area())
+}
+```
+
+It is opt-in because enumerating page objects costs a call per object.
+`WithImageOCR` turns it on by itself, and [Markdown output](markdown.md) uses
+it to place figures.

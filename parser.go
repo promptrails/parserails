@@ -2,11 +2,13 @@ package parserails
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	pdfium "github.com/klippa-app/go-pdfium"
+	pdfium_errors "github.com/klippa-app/go-pdfium/errors"
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/responses"
@@ -33,11 +35,18 @@ const (
 // It is safe for concurrent use: each Parse call borrows an instance from the
 // pool and returns it when done. Create one Parser per process and reuse it.
 type Parser struct {
-	pool        pdfium.Pool
-	ocr         OCR
-	granularity Granularity
-	fontInfo    bool
-	sofficeBin  string
+	pool         pdfium.Pool
+	ocr          OCR
+	granularity  Granularity
+	fontInfo     bool
+	sofficeBin   string
+	password     string
+	maxPages     int
+	imageOCR     bool
+	images       bool
+	nativeOffice bool
+	timeout      time.Duration
+	containers   map[Format]Container
 }
 
 // Option configures a Parser.
@@ -49,6 +58,13 @@ type config struct {
 	granularity                Granularity
 	fontInfo                   bool
 	sofficeBin                 string
+	password                   string
+	maxPages                   int
+	imageOCR                   bool
+	images                     bool
+	nativeOffice               bool
+	timeout                    time.Duration
+	containers                 map[Format]Container
 }
 
 // WithOCR sets the OCR backend used as a fallback for pages with no extractable
@@ -73,6 +89,58 @@ func WithPoolSize(minIdle, maxIdle, maxTotal int) Option {
 // the PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
 func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin = path } }
 
+// WithImageOCR also recognizes the text inside raster figures on pages that do
+// have a text layer, merging it with the native words. Without it, OCR only
+// runs on pages with no extractable text at all.
+//
+// It costs one page render plus one OCR call per substantial figure, so it is
+// off by default; it needs an OCR backend (WithOCR) to do anything.
+func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
+
+// WithTimeout caps how long any single document may take. Zero, the default,
+// means no cap.
+//
+// PDFium cannot be interrupted, so a document that exceeds the timeout is
+// abandoned rather than killed: the call returns, and the worker finishes in
+// the background and releases itself. That is what keeps one pathological
+// file in a batch of ten thousand from stalling the pipeline.
+func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
+
+// WithNativeOffice reads Office Open XML packages (DOCX, XLSX, PPTX) directly
+// instead of converting them with LibreOffice, wherever text rather than page
+// geometry is wanted: ExtractTextData, ExtractFileText and the Extract walk.
+//
+// It removes the LibreOffice dependency for those paths and keeps the
+// document's own structure — real table cells, declared heading levels — at
+// the cost of page coordinates, which a package does not have. Text
+// extraction falls back to it by itself when LibreOffice is missing.
+func WithNativeOffice() Option { return func(c *config) { c.nativeOffice = true } }
+
+// WithContainer registers a Container for a format, replacing the built-in
+// one. It is how you teach ParseRails to unpack something it does not know —
+// or stop it unpacking something it does.
+func WithContainer(format Format, c Container) Option {
+	return func(cfg *config) {
+		if cfg.containers == nil {
+			cfg.containers = map[Format]Container{}
+		}
+		cfg.containers[format] = c
+	}
+}
+
+// WithImages records the raster figures on each page (Page.Images), so
+// Markdown output can place them and callers can crop them. It costs one call
+// per page object, so it is off by default; WithImageOCR implies it.
+func WithImages() Option { return func(c *config) { c.images = true } }
+
+// WithPassword sets the default password used to open encrypted documents. It
+// can be overridden per read with ReadOptions.Password.
+func WithPassword(password string) Option { return func(c *config) { c.password = password } }
+
+// WithMaxPages caps how many pages any single read parses. Zero (the default)
+// means no cap; it can be overridden per read with ReadOptions.MaxPages.
+func WithMaxPages(n int) Option { return func(c *config) { c.maxPages = n } }
+
 // New initializes a Parser backed by a pure-Go PDFium WebAssembly runtime.
 // No cgo and no system libraries are required. Call Close when finished.
 func New(opts ...Option) (*Parser, error) {
@@ -85,29 +153,60 @@ func New(opts ...Option) (*Parser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parserails: init pdfium pool: %w", err)
 	}
-	return &Parser{
+	parser := &Parser{
 		pool:        pool,
 		ocr:         cfg.ocr,
 		granularity: cfg.granularity,
 		fontInfo:    cfg.fontInfo,
 		sofficeBin:  cfg.sofficeBin,
-	}, nil
+		password:    cfg.password,
+		maxPages:    cfg.maxPages,
+		imageOCR:    cfg.imageOCR,
+		images:      cfg.images || cfg.imageOCR,
+
+		nativeOffice: cfg.nativeOffice,
+		timeout:      cfg.timeout,
+	}
+	parser.containers = defaultContainers(parser)
+	for format, c := range cfg.containers {
+		parser.containers[format] = c
+	}
+	return parser, nil
 }
 
 // Close releases the PDFium runtime and all pooled workers.
 func (p *Parser) Close() error { return p.pool.Close() }
 
-// Parse extracts every page's words with bounding boxes from the given PDF data.
+// Parse extracts every page's words with bounding boxes from the given PDF
+// data, using the parser's defaults. Use ParseData for input that may be in
+// another format, or to select pages and pass a password per call.
 func (p *Parser) Parse(ctx context.Context, data []byte) (*Document, error) {
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	if f := Sniff(data); f != FormatPDF && f != FormatUnknown {
+		return nil, fmt.Errorf("parserails: Parse wants PDF data, got %s; use ParseData", f)
+	}
+	return p.parsePDF(ctx, data, ReadOptions{})
+}
+
+// parsePDF is the PDF parsing core: every entry point funnels here once the
+// input is known to be a PDF.
+func (p *Parser) parsePDF(ctx context.Context, data []byte, opt ReadOptions) (*Document, error) {
+	return bounded(ctx, p, func(ctx context.Context) (*Document, error) {
+		return p.parsePDFUnbounded(ctx, data, opt)
+	})
+}
+
+func (p *Parser) parsePDFUnbounded(ctx context.Context, data []byte, opt ReadOptions) (*Document, error) {
+	opt = p.withDefaults(opt)
+
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("parserails: acquire instance: %w", err)
 	}
 	defer func() { _ = inst.Close() }()
 
-	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
+	doc, err := openDocument(inst, data, opt.Password)
 	if err != nil {
-		return nil, fmt.Errorf("parserails: open document: %w", err)
+		return nil, err
 	}
 	defer func() {
 		_, _ = inst.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
@@ -117,19 +216,43 @@ func (p *Parser) Parse(ctx context.Context, data []byte) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parserails: page count: %w", err)
 	}
+	pages, err := selectPages(count.PageCount, opt)
+	if err != nil {
+		return nil, err
+	}
 
-	out := &Document{Pages: make([]Page, 0, count.PageCount)}
-	for i := 0; i < count.PageCount; i++ {
+	out := &Document{Pages: make([]Page, 0, len(pages))}
+	for _, index := range pages {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := p.parsePage(ctx, inst, doc.Document, i)
+		page, err := p.parsePage(ctx, inst, doc.Document, index)
 		if err != nil {
 			return nil, err
 		}
 		out.Pages = append(out.Pages, page)
 	}
 	return out, nil
+}
+
+// openDocument opens a PDF, translating PDFium's password errors into an error
+// that says what is actually wrong.
+func openDocument(inst pdfium.Pdfium, data []byte, password string) (*responses.OpenDocument, error) {
+	req := &requests.OpenDocument{File: &data}
+	if password != "" {
+		req.Password = &password
+	}
+	doc, err := inst.OpenDocument(req)
+	if err != nil {
+		if errors.Is(err, pdfium_errors.ErrPassword) || strings.Contains(err.Error(), "invalid password") {
+			if password == "" {
+				return nil, fmt.Errorf("parserails: document is encrypted: %w", err)
+			}
+			return nil, fmt.Errorf("parserails: wrong password: %w", err)
+		}
+		return nil, fmt.Errorf("parserails: open document: %w", err)
+	}
+	return doc, nil
 }
 
 func (p *Parser) parsePage(ctx context.Context, inst pdfium.Pdfium, docRef references.FPDF_DOCUMENT, index int) (Page, error) {
@@ -160,15 +283,37 @@ func (p *Parser) parsePage(ctx context.Context, inst pdfium.Pdfium, docRef refer
 		page.Words = wordsFromChars(text.Chars, index)
 	}
 
-	// Scanned/image-only page: no extractable text. Fall back to OCR if set.
-	if len(page.Words) == 0 {
-		ocrWords, err := p.ocrPage(ctx, inst, pageReq, pageSize{Width: size.Width, Height: size.Height})
+	dims := pageSize{Width: size.Width, Height: size.Height}
+	if p.images {
+		images, err := pageImages(inst, pageReq)
+		if err != nil {
+			return Page{}, err
+		}
+		page.Images = images
+	}
+	switch {
+	case len(page.Words) == 0:
+		// Scanned/image-only page: no extractable text. Fall back to OCR.
+		ocrWords, err := p.ocrPage(ctx, inst, pageReq, dims)
 		if err != nil {
 			return Page{}, err
 		}
 		page.Words = ocrWords
+	case p.imageOCR && p.hasOCR():
+		// Text page with figures: read what the pictures say too.
+		words, err := p.ocrFigures(ctx, inst, pageReq, dims, page.Words, index, page.Images)
+		if err != nil {
+			return Page{}, err
+		}
+		page.Words = words
 	}
 	return page, nil
+}
+
+// hasOCR reports whether a real OCR backend is configured.
+func (p *Parser) hasOCR() bool {
+	_, none := p.ocr.(noOCR)
+	return !none
 }
 
 // wordsFromChars groups characters into words split on whitespace; each word's

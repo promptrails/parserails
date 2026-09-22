@@ -2,7 +2,10 @@ module github.com/promptrails/parserails
 
 go 1.27.0
 
-require github.com/klippa-app/go-pdfium v1.20.3
+require (
+	github.com/klippa-app/go-pdfium v1.20.3
+	golang.org/x/image v0.46.0
+)
 
 require (
 	github.com/fatih/color v1.13.0 // indirect

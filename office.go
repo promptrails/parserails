@@ -2,6 +2,7 @@ package parserails
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,19 +10,10 @@ import (
 	"strings"
 )
 
-// officeExts are the formats converted to PDF via LibreOffice before parsing.
-var officeExts = map[string]bool{
-	".docx": true, ".doc": true,
-	".pptx": true, ".ppt": true,
-	".xlsx": true, ".xls": true,
-	".odt": true, ".odp": true, ".ods": true, ".rtf": true,
-}
-
-// IsOfficeFormat reports whether path has an extension ParseRails converts to PDF
-// via LibreOffice before parsing.
-func IsOfficeFormat(path string) bool {
-	return officeExts[strings.ToLower(filepath.Ext(path))]
-}
+// ErrNoLibreOffice reports that no LibreOffice binary could be found. Office
+// conversion wraps it, so callers can fall back to reading a package natively
+// instead of treating a missing dependency like a broken document.
+var ErrNoLibreOffice = errors.New("parserails: LibreOffice not found")
 
 // locateSoffice finds the LibreOffice binary: an explicit path, then the
 // PARSERAILS_SOFFICE env var, then "soffice"/"libreoffice" on PATH.
@@ -35,13 +27,23 @@ func locateSoffice(explicit string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("parserails: LibreOffice not found (install it or set PARSERAILS_SOFFICE)")
+	return "", fmt.Errorf("%w (install it or set PARSERAILS_SOFFICE)", ErrNoLibreOffice)
 }
 
 // convertToPDF renders an office document to PDF bytes using headless
-// LibreOffice. A throwaway user profile is used per call so conversions can run
-// concurrently without colliding on LibreOffice's default profile lock.
+// LibreOffice, under the parser's timeout. Unlike PDFium, LibreOffice is a
+// subprocess and really is killable, so a stuck conversion dies rather than
+// being abandoned.
 func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) {
+	return bounded(ctx, p, func(ctx context.Context) ([]byte, error) {
+		return p.convertFile(ctx, path)
+	})
+}
+
+// convertFile is the conversion itself. A throwaway user profile is used per
+// call so conversions can run concurrently without colliding on LibreOffice's
+// default profile lock.
+func (p *Parser) convertFile(ctx context.Context, path string) ([]byte, error) {
 	bin, err := locateSoffice(p.sofficeBin)
 	if err != nil {
 		return nil, err
@@ -76,4 +78,54 @@ func (p *Parser) convertToPDF(ctx context.Context, path string) ([]byte, error) 
 		return nil, fmt.Errorf("parserails: read converted pdf: %w", err)
 	}
 	return data, nil
+}
+
+// convertDataToPDF converts an office document held in memory. LibreOffice only
+// reads files, so the bytes are staged in a temp file named with the format's
+// extension — it dispatches on that, not on content.
+func (p *Parser) convertDataToPDF(ctx context.Context, data []byte, format Format) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "parserails-input-")
+	if err != nil {
+		return nil, fmt.Errorf("parserails: temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	path := filepath.Join(dir, "document"+format.Ext())
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return nil, fmt.Errorf("parserails: stage input: %w", err)
+	}
+	return p.convertToPDF(ctx, path)
+}
+
+// officeText reads an office document's text, natively for an OOXML package
+// when that was asked for — or when LibreOffice is missing and the package can
+// be read without it.
+func (p *Parser) officeText(ctx context.Context, data []byte, format Format, opt ReadOptions) (string, error) {
+	if p.nativeOffice && format.IsOOXML() {
+		return p.nativeOfficeText(ctx, data, format)
+	}
+
+	pdf, err := p.convertDataToPDF(ctx, data, format)
+	if err != nil {
+		if errors.Is(err, ErrNoLibreOffice) && format.IsOOXML() {
+			if text, nativeErr := p.nativeOfficeText(ctx, data, format); nativeErr == nil {
+				return text, nil
+			}
+		}
+		return "", err
+	}
+	return p.extractPDFText(ctx, pdf, opt)
+}
+
+// nativeOfficeText reads an OOXML package under the same deadline as every
+// other document operation. Reading a package is pure CPU and memory, and a
+// large one can take long enough that a caller who set a timeout meant it.
+func (p *Parser) nativeOfficeText(ctx context.Context, data []byte, format Format) (string, error) {
+	return bounded(ctx, p, func(context.Context) (string, error) {
+		doc, err := ReadOfficeDocument(data, format)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
+	})
 }

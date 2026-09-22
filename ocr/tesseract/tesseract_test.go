@@ -31,6 +31,28 @@ func TestParseTSV(t *testing.T) {
 	if w := words[0]; w.X0 != 10 || w.Y0 != 20 || w.X1 != 50 || w.Y1 != 32 {
 		t.Errorf("box = %+v, want [10 20 50 32]", w)
 	}
+	// Tesseract's percentage becomes a 0-1 score.
+	if got := words[0].Confidence; got != 0.96 {
+		t.Errorf("confidence = %v, want 0.96", got)
+	}
+	if !words[0].IsOCR() {
+		t.Error("an OCR word should report IsOCR")
+	}
+}
+
+func TestParseTSVScoresZeroConfidenceWords(t *testing.T) {
+	b := &backend{}
+	tsv := "level\tpage\tblock\tpar\tline\tword\tleft\ttop\twidth\theight\tconf\ttext\n" +
+		"5\t1\t1\t1\t1\t1\t10\t20\t40\t12\t0\tsmudge\n"
+	words, err := b.parseTSV([]byte(tsv))
+	if err != nil {
+		t.Fatalf("parseTSV: %v", err)
+	}
+	// Tesseract kept this word but scored it 0; a recognized word must still
+	// report a positive confidence, since 0 is reserved for native text.
+	if len(words) != 1 || words[0].Confidence <= 0 {
+		t.Fatalf("words = %+v, want one word with a positive confidence", words)
+	}
 }
 
 func TestDefaults(t *testing.T) {

@@ -59,10 +59,11 @@ func TestWordsFromRectsSkipsBlank(t *testing.T) {
 }
 
 func TestPixelsToPoints(t *testing.T) {
-	// A 100pt-tall page rendered at ratio 0.5 pt/px (i.e. 200px tall).
-	// A pixel box at top-left (x:20..40, y:10..30) → PDF points, Y flipped.
+	// A 100pt-tall page rendered 200px tall: PDFium reports ratio 2, pixels
+	// per point. A pixel box at top-left (x:20..40, y:10..30) → PDF points,
+	// with Y flipped.
 	in := []Word{{Text: "x", X0: 20, X1: 40, Y0: 10, Y1: 30}}
-	out := pixelsToPoints(in, 0.5, 100)
+	out := pixelsToPoints(in, 2, 100)
 	w := out[0]
 	if w.X0 != 10 || w.X1 != 20 {
 		t.Errorf("X = [%v %v], want [10 20]", w.X0, w.X1)

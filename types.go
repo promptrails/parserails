@@ -1,5 +1,7 @@
 package parserails
 
+import "strings"
+
 // Word is a single extracted token with its spatial bounding box.
 //
 // Coordinates are in PDF user space (origin at the bottom-left of the page),
@@ -15,7 +17,15 @@ type Word struct {
 	// FontSize is the font size in points. It is 0 unless the parser was created
 	// with WithFontInfo (and GranularityWord).
 	FontSize float64 `json:"font_size,omitempty"`
+	// Confidence is how sure the recognizer is of this word, from 0 to 1. It is
+	// 0 for text extracted natively from the PDF, which is not a guess and
+	// carries no score; OCR backends that report one set it.
+	Confidence float64 `json:"confidence,omitempty"`
 }
+
+// IsOCR reports whether the word came from an OCR backend rather than from the
+// document's own text layer.
+func (w Word) IsOCR() bool { return w.Confidence > 0 }
 
 // Page holds the words extracted from a single page plus its dimensions.
 type Page struct {
@@ -23,6 +33,10 @@ type Page struct {
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
 	Words  []Word  `json:"words"`
+	// Images are the raster figures drawn on the page. They are only collected
+	// when the parser was created with WithImages or WithImageOCR, since
+	// enumerating page objects costs a call per object.
+	Images []ImageRegion `json:"images,omitempty"`
 }
 
 // Document is the result of parsing one input file.
@@ -39,16 +53,20 @@ func (d *Document) Words() []Word {
 	return out
 }
 
-// Text concatenates all words across all pages, space-separated.
+// Text returns the document's text with its line structure reconstructed:
+// words are grouped into lines by geometry, lines are joined with newlines, and
+// pages are separated by a form feed ("\f").
+//
+// Reading order is top-to-bottom, then left-to-right. Multi-column pages are
+// read line-by-line across the whole page width; use Blocks or Markdown when
+// column structure matters.
 func (d *Document) Text() string {
-	var b []byte
+	var b strings.Builder
 	for i := range d.Pages {
-		for j := range d.Pages[i].Words {
-			if len(b) > 0 {
-				b = append(b, ' ')
-			}
-			b = append(b, d.Pages[i].Words[j].Text...)
+		if i > 0 {
+			b.WriteByte('\f')
 		}
+		b.WriteString(d.Pages[i].Text())
 	}
-	return string(b)
+	return b.String()
 }

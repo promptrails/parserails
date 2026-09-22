@@ -3,9 +3,7 @@ package parserails
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/klippa-app/go-pdfium/requests"
 )
@@ -19,15 +17,51 @@ import (
 // Scanned/image-only pages produce no text here; ExtractText does not run OCR
 // (use Parse with WithOCR for that).
 func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
-	inst, err := p.pool.GetInstance(30 * time.Second)
+	if f := Sniff(data); f != FormatPDF && f != FormatUnknown {
+		return "", fmt.Errorf("parserails: ExtractText wants PDF data, got %s; use ExtractTextData", f)
+	}
+	return p.extractPDFText(ctx, data, ReadOptions{})
+}
+
+// ExtractTextData is the in-memory counterpart of ExtractText: it detects the
+// format, converts office documents, and honours ReadOptions (password, page
+// selection).
+func (p *Parser) ExtractTextData(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
+	format := Detect(opt.Name, data)
+	switch {
+	case format == FormatPDF:
+		return p.extractPDFText(ctx, data, opt)
+	case format.IsOffice():
+		return p.officeText(ctx, data, format, opt)
+	case format.IsImage():
+		doc, err := p.ParseImage(ctx, data)
+		if err != nil {
+			return "", err
+		}
+		return doc.Text(), nil
+	default:
+		return "", unparsableError(opt.Name, format)
+	}
+}
+
+func (p *Parser) extractPDFText(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
+	return bounded(ctx, p, func(ctx context.Context) (string, error) {
+		return p.extractPDFTextUnbounded(ctx, data, opt)
+	})
+}
+
+func (p *Parser) extractPDFTextUnbounded(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
+	opt = p.withDefaults(opt)
+
+	inst, err := p.pool.GetInstance(p.acquireTimeout())
 	if err != nil {
 		return "", fmt.Errorf("parserails: acquire instance: %w", err)
 	}
 	defer func() { _ = inst.Close() }()
 
-	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
+	doc, err := openDocument(inst, data, opt.Password)
 	if err != nil {
-		return "", fmt.Errorf("parserails: open document: %w", err)
+		return "", err
 	}
 	defer func() {
 		_, _ = inst.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
@@ -37,9 +71,13 @@ func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parserails: page count: %w", err)
 	}
+	pages, err := selectPages(count.PageCount, opt)
+	if err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
-	for i := 0; i < count.PageCount; i++ {
+	for n, i := range pages {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
@@ -49,7 +87,7 @@ func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("parserails: page %d text: %w", i, err)
 		}
-		if i > 0 {
+		if n > 0 {
 			b.WriteByte('\f')
 		}
 		b.WriteString(res.Text)
@@ -60,18 +98,22 @@ func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
 // ExtractFileText is the file counterpart of ExtractText: PDFs are read directly,
 // office documents are converted via LibreOffice first.
 func (p *Parser) ExtractFileText(ctx context.Context, path string) (string, error) {
-	if IsOfficeFormat(path) {
-		pdf, err := p.convertToPDF(ctx, path)
+	data, format, err := readAndDetect(path)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case format == FormatPDF:
+		return p.extractPDFText(ctx, data, ReadOptions{Name: path})
+	case format.IsOffice():
+		return p.officeText(ctx, data, format, ReadOptions{Name: path})
+	case format.IsImage():
+		doc, err := p.ParseImage(ctx, data)
 		if err != nil {
 			return "", err
 		}
-		return p.ExtractText(ctx, pdf)
+		return doc.Text(), nil
+	default:
+		return "", unparsableError(path, format)
 	}
-	// #nosec G304 -- `path` is this function's own API parameter: opening the
-	// file the caller names is the whole contract of a document parser.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("parserails: read file: %w", err)
-	}
-	return p.ExtractText(ctx, data)
 }
