@@ -103,6 +103,22 @@ func TestDocxNestedTableKeepsTheOuterRow(t *testing.T) {
 	}
 }
 
+func TestDocxNestedTableIsSeparatedFromWhatFollows(t *testing.T) {
+	docx := zipArchive(map[string][]byte{
+		"word/document.xml": []byte(`<w:document xmlns:w="x"><w:body><w:tbl><w:tr><w:tc>` +
+			`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Inner</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` +
+			`<w:p><w:r><w:t>After</w:t></w:r></w:p>` +
+			`</w:tc></w:tr></w:tbl></w:body></w:document>`),
+	})
+	doc, err := ReadOfficeDocument(docx, FormatDOCX)
+	if err != nil {
+		t.Fatalf("ReadOfficeDocument: %v", err)
+	}
+	if cell := doc.Blocks[0].Rows[0][0].Text; cell != "Inner\nAfter" {
+		t.Fatalf("cell = %q, want the nested table and the paragraph on separate lines", cell)
+	}
+}
+
 func TestSheetRowsKeepsEveryValueWhenTheGridCannotBeBuilt(t *testing.T) {
 	// One value per row, each in its own column: even compacted, the grid
 	// would be rows x rows. The values survive; only the alignment does not.

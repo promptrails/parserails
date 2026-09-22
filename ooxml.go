@@ -282,7 +282,10 @@ func docxTable(dec *xml.Decoder, start xml.StartElement) (Block, error) {
 				}
 				depth--
 				if inCel && skipAt == 0 {
-					cell.WriteString(flattenTable(nested))
+					if text := flattenTable(nested); text != "" {
+						cell.WriteString(text)
+						cell.WriteByte('\n') // keep it off the next paragraph
+					}
 				}
 			case "tr":
 				row = nil

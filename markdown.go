@@ -99,7 +99,12 @@ func markdownTable(block Block) string {
 	lines := make([]string, 0, len(rows)+2)
 	lines = append(lines, renderRow(header, width), separatorRow(width))
 	for _, row := range rows {
-		lines = append(lines, renderRow(row, width))
+		// Rendered at its own width, not padded out to the widest row.
+		// GitHub-flavoured Markdown allows a short row, and padding one
+		// rebuilds exactly the rectangle a ragged table exists to avoid:
+		// one wide row among thousands of narrow ones would cost a cell for
+		// every column of every row.
+		lines = append(lines, renderRow(row, len(row)))
 	}
 	return strings.Join(lines, "\n")
 }

@@ -275,6 +275,81 @@ func TestOlePackageHeaderIsNotChargedToThePayload(t *testing.T) {
 	}
 }
 
+func TestQuotedPrintableAttachmentsAreNotTruncated(t *testing.T) {
+	// Quoted-printable triples a byte in the worst case: measuring the
+	// encoded form against the budget silently cut attachments short.
+	payload := []byte("ÄÖÜ ready")
+	var b bytes.Buffer
+	b.WriteString("From: a@b.c\r\nSubject: s\r\nMIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: multipart/mixed; boundary=B\r\n\r\n")
+	b.WriteString("--B\r\nContent-Type: application/octet-stream\r\n")
+	b.WriteString("Content-Disposition: attachment; filename=\"note.bin\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	for _, c := range payload {
+		fmt.Fprintf(&b, "=%02X", c)
+	}
+	b.WriteString("\r\n--B--\r\n")
+
+	children, err := (emlContainer{}).Children(context.Background(), b.Bytes(),
+		ChildRequest{MaxBytes: int64(len(payload))})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(children) != 1 || children[0].Err != nil {
+		t.Fatalf("children = %+v, want the attachment accepted whole", children)
+	}
+	if !bytes.Equal(children[0].Data, payload) {
+		t.Fatalf("data = %q, want %q", children[0].Data, payload)
+	}
+}
+
+func TestNestedMessagesAreBudgeted(t *testing.T) {
+	msg := buildCFB([]cfbTestEntry{
+		{Name: "__substg1.0_0037001F", Data: utf16Bytes("outer")},
+		{Name: "__attach_version1.0_#00000000", Children: []cfbTestEntry{
+			{Name: "__substg1.0_3701000D", Children: []cfbTestEntry{
+				{Name: "__substg1.0_1000001F", Data: utf16Bytes("a body well over the budget")},
+			}},
+		}},
+	})
+	children, err := (msgContainer{}).Children(context.Background(), msg, ChildRequest{MaxBytes: 4})
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	for _, c := range children {
+		if len(c.Data) > 4 {
+			t.Fatalf("emitted %d bytes under a 4 byte budget", len(c.Data))
+		}
+		if c.Err == nil {
+			t.Errorf("the refused message should carry a reason: %+v", c)
+		}
+	}
+}
+
+func TestFileSlotsAreReservedForSiblings(t *testing.T) {
+	p := newTestParser(t)
+	inner := zipArchive(map[string][]byte{
+		"i1.txt": []byte("one"), "i2.txt": []byte("two"), "i3.txt": []byte("three"),
+	})
+	outer := zipArchive(map[string][]byte{
+		"a.zip": inner, "b.txt": []byte("b"), "c.txt": []byte("c"), "d.txt": []byte("d"),
+	})
+
+	node, err := p.Extract(context.Background(), outer, ExtractOptions{MaxFiles: 5})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	opened := 0
+	node.Walk(func(n *Node) {
+		if n.Err == nil {
+			opened++
+		}
+	})
+	if opened > 5 {
+		t.Fatalf("opened %d files under a limit of 5:\n%s", opened, treeSummary(node))
+	}
+}
+
 func TestExtractForwardsThePasswordToAttachments(t *testing.T) {
 	p := newTestParser(t)
 	node, err := p.Extract(context.Background(), encryptedPDF("Secret Report", "hunter2"),

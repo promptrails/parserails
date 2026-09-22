@@ -160,15 +160,15 @@ func readMailChild(r io.Reader, encoding, name string, budget *childBudget) Chil
 		return Child{Name: name, Err: errBudgetSpent}
 	}
 
-	// Read enough encoded bytes to cover limit decoded ones, plus one to tell
-	// "exactly at the limit" from "over it".
-	encodedCap := limit + limit/3 + 8
-	raw, err := io.ReadAll(io.LimitReader(r, encodedCap))
+	// Decoded while reading, and limited on the decoded side: guessing an
+	// encoded size cannot work. Quoted-printable triples a byte in the worst
+	// case, base64 adds a line break every 76 characters, and a guess that
+	// comes up short truncates the attachment without saying so.
+	data, err := io.ReadAll(io.LimitReader(transferReader(r, encoding), limit+1))
 	if err != nil {
 		budget.refuse()
 		return Child{Name: name, Err: fmt.Errorf("parserails: read mail part: %w", err)}
 	}
-	data := decodeTransfer(raw, encoding)
 	if int64(len(data)) > limit {
 		budget.refuse()
 		return Child{Name: name,
@@ -184,6 +184,20 @@ func isAttachment(disposition, filename string) bool {
 	}
 	mediaType, _, err := mime.ParseMediaType(disposition)
 	return err == nil && mediaType == "attachment"
+}
+
+// transferReader undoes a part's transfer encoding as it is read, so a limit
+// can be applied to the bytes the part actually carries.
+func transferReader(r io.Reader, encoding string) io.Reader {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "base64":
+		// The decoder skips the line breaks base64 bodies are wrapped at.
+		return base64.NewDecoder(base64.StdEncoding, r)
+	case "quoted-printable":
+		return quotedprintable.NewReader(r)
+	default:
+		return r
+	}
 }
 
 func decodeTransfer(data []byte, encoding string) []byte {

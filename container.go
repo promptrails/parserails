@@ -248,11 +248,11 @@ type walker struct {
 	seen      map[[32]byte]bool
 }
 
-// visit reads one file and descends into it. charged says whether this
-// node's bytes were already taken out of the budget when its parent unpacked
-// it — they are reserved there, before the walk descends, so a nested archive
-// cannot be handed a fresh budget at every level while its siblings are still
-// in memory.
+// visit reads one file and descends into it. charged says whether this node
+// was already taken out of the budget — both its bytes and its file slot —
+// when its parent unpacked it. That reservation happens before the walk
+// descends, so a nested archive cannot be handed a fresh budget at every
+// level while its siblings are still in memory.
 func (w *walker) visit(ctx context.Context, name string, data []byte, depth int, charged bool) (*Node, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -260,8 +260,8 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 	format := Detect(name, data)
 	node := &Node{Name: name, Format: format}
 
-	w.files++
 	if !charged {
+		w.files++
 		w.remaining -= int64(len(data))
 	}
 	if w.maxFiles > 0 && w.files > w.maxFiles {
@@ -291,9 +291,11 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 		node.Err = err
 		return node, nil
 	}
-	// Reserve what the container unpacked before descending into any of it:
-	// the bytes are already held, and charging them one by one as the walk
-	// reaches them lets each level believe the whole budget is still free.
+	// Reserve what the container produced before descending into any of it:
+	// the bytes are already held, and counting a level only when the walk
+	// reaches it lets every level believe the whole budget is still free —
+	// for its siblings' file slots as much as for their bytes.
+	w.files += len(children)
 	for _, child := range children {
 		w.remaining -= int64(len(child.Data))
 	}
@@ -301,7 +303,6 @@ func (w *walker) visit(ctx context.Context, name string, data []byte, depth int,
 		if child.Err != nil {
 			// Found but not taken: keep it in the tree with its reason.
 			node.Children = append(node.Children, &Node{Name: child.Name, Err: child.Err})
-			w.files++
 			continue
 		}
 		sub, err := w.visit(ctx, child.Name, child.Data, depth+1, true)

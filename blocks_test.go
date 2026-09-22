@@ -127,6 +127,29 @@ func TestMarkdownTableIsOneUnbrokenBlock(t *testing.T) {
 	}
 }
 
+func TestMarkdownTableDoesNotPadRaggedRows(t *testing.T) {
+	// One wide row among many narrow ones. Padding every row out to the
+	// widest rebuilds the rectangle a ragged table exists to avoid.
+	wide := make([]Cell, 500)
+	for i := range wide {
+		wide[i] = Cell{Text: "x"}
+	}
+	rows := [][]Cell{wide}
+	for i := 0; i < 500; i++ {
+		rows = append(rows, []Cell{{Text: "y"}})
+	}
+
+	md := markdownTable(Block{Rows: rows})
+	// 500 wide cells plus 500 narrow rows, not 500 x 500.
+	if len(md) > 64<<10 {
+		t.Fatalf("rendered %d KiB from 1000 cells", len(md)>>10)
+	}
+	lines := strings.Split(md, "\n")
+	if got := strings.Count(lines[len(lines)-1], "|"); got != 2 {
+		t.Errorf("last row has %d pipes, want a row of its own width", got)
+	}
+}
+
 func TestBlocksDropsRunningHeadersAndFooters(t *testing.T) {
 	p := newTestParser(t, WithFontInfo())
 	var pages [][]textRun

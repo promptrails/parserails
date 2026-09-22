@@ -80,6 +80,10 @@ and the same text size. A line ending in `-` is rejoined without it.
 (`1.`, `2)`, `a.`). Wrapped continuation lines are folded in by their hanging
 indent.
 
+Rows are rendered at their own width rather than padded out to the widest
+one — GitHub-flavoured Markdown allows a short row, and padding rebuilds
+exactly the rectangle that a ragged table exists to avoid.
+
 A table cell that held several paragraphs keeps the break as `<br>`: a pipe
 table cannot contain a newline, and joining the paragraphs without one would
 invent words that are in no document.

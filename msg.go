@@ -58,9 +58,22 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 		// plain suffix match would — leaves the last nested stream standing
 		// in for the attachment.
 		if inner, deeper := strings.CutPrefix(prop, msgPropPrefix+msgPropAttachData+"000D/"); deeper {
-			if id, kind, ok := msgProperty(inner); ok {
-				att.nested[id] = msgString(f.readStream(s.Entry), kind)
+			id, kind, ok := msgProperty(inner)
+			if !ok {
+				continue
 			}
+			// A forwarded message is an attachment like any other: its
+			// property streams are read against the same budget.
+			limit, room := budget.room(maxChildBytes)
+			if !room || !budget.fits(s.Entry.Size, limit) {
+				budget.refuse()
+				att.err = fmt.Errorf(
+					"parserails: embedded message is larger than the remaining %d byte budget", limit)
+				continue
+			}
+			text := msgString(f.readStream(s.Entry), kind)
+			budget.spend(int64(len(text)))
+			att.nested[id] = text
 			continue
 		}
 		if strings.Contains(prop, "/") {
@@ -108,7 +121,7 @@ func (msgContainer) Children(_ context.Context, data []byte, req ChildRequest) (
 				name = sanitizeChildName(storage) + Sniff(att.data).Ext()
 			}
 			out = append(out, Child{Name: sanitizeChildName(name), Data: att.data})
-		case len(att.nested) > 0:
+		case att.err == nil && len(att.nested) > 0:
 			// A forwarded message. Its parts cannot be reassembled into a
 			// .msg, so its text is carried out instead of being lost.
 			if name == "" {
