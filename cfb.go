@@ -63,12 +63,18 @@ func openCFB(data []byte) (*cfbFile, error) {
 		return nil, fmt.Errorf("parserails: not a compound file")
 	}
 	f := &cfbFile{data: data}
-	f.sectorSize = 1 << binary.LittleEndian.Uint16(data[30:32])
-	f.miniSize = 1 << binary.LittleEndian.Uint16(data[32:34])
-	f.miniCutoff = binary.LittleEndian.Uint32(data[56:60])
-	if f.sectorSize < 128 || f.sectorSize > 1<<20 || f.miniSize < 16 {
+	// The shifts are exponents taken from the file: 62 means a sector of
+	// 2^62 bytes, which then overflows every offset computed from it. The
+	// specification allows 9 or 12 for sectors and 6 for mini sectors; a
+	// little room either side is tolerated, nonsense is not.
+	sectorShift := binary.LittleEndian.Uint16(data[30:32])
+	miniShift := binary.LittleEndian.Uint16(data[32:34])
+	if sectorShift < 7 || sectorShift > 20 || miniShift < 4 || miniShift >= sectorShift {
 		return nil, fmt.Errorf("parserails: compound file has an implausible sector size")
 	}
+	f.sectorSize = 1 << sectorShift
+	f.miniSize = 1 << miniShift
+	f.miniCutoff = binary.LittleEndian.Uint32(data[56:60])
 
 	if err := f.readFAT(); err != nil {
 		return nil, err
@@ -256,11 +262,14 @@ func (f *cfbFile) readStream(e cfbEntry) []byte {
 			break
 		}
 		seen[id] = true
-		from := int(id) * f.miniSize
-		if from < 0 || from+f.miniSize > len(f.miniStream) {
+		// Computed in uint64 and compared before narrowing: id is a 32-bit
+		// number from the file, and id*miniSize overflows int for a large
+		// one, wrapping past the bounds check into a negative slice index.
+		from := uint64(id) * uint64(f.miniSize)
+		if from+uint64(f.miniSize) > uint64(len(f.miniStream)) {
 			break
 		}
-		out = append(out, f.miniStream[from:from+f.miniSize]...)
+		out = append(out, f.miniStream[from:from+uint64(f.miniSize)]...)
 		if int(id) >= len(f.miniFAT) {
 			break
 		}

@@ -35,31 +35,50 @@ func bounded[T any](ctx context.Context, p *Parser, op func(context.Context) (T,
 	if p.timeout > 0 && (!hasDeadline || time.Until(callerDeadline) > p.timeout) {
 		inner, cancel = context.WithTimeout(ctx, p.timeout)
 	}
+	// Cancelled by whoever stops waiting, not by the worker: on the timeout
+	// path this also tells an abandoned operation that can hear it — a
+	// LibreOffice subprocess — to stop.
+	defer cancel()
 
-	type result struct {
-		value T
-		err   error
-	}
 	// Buffered: the abandoned goroutine must never block on a send nobody is
 	// waiting for.
-	done := make(chan result, 1)
+	done := make(chan boundedResult[T], 1)
 	go func() {
-		defer cancel()
 		value, err := op(inner)
-		done <- result{value, err}
+		done <- boundedResult[T]{value, err}
 	}()
 
+	return awaitBounded(ctx, inner, done, p.timeout)
+}
+
+// boundedResult carries an operation's outcome off its goroutine.
+type boundedResult[T any] struct {
+	value T
+	err   error
+}
+
+// awaitBounded waits for the operation or for the deadline, whichever comes
+// first — preferring the operation when both are ready.
+//
+// That preference is the point: select chooses uniformly at random among
+// ready cases, so an operation that finishes in the same instant the deadline
+// passes was reported as a timeout about half the time it raced, discarding a
+// result that had already been computed.
+func awaitBounded[T any](ctx, inner context.Context, done <-chan boundedResult[T], timeout time.Duration) (T, error) {
+	var zero T
 	select {
 	case r := <-done:
 		return r.value, r.err
 	case <-inner.Done():
-		// A caller's own deadline is enforced here too. Letting it "govern"
-		// by running inline would mean nothing enforced it at all: the engine
-		// never looks at the context once a call is under way.
+		select {
+		case r := <-done:
+			return r.value, r.err
+		default:
+		}
 		if err := ctx.Err(); err != nil {
 			return zero, err
 		}
-		return zero, fmt.Errorf("parserails: document timed out after %s", p.timeout)
+		return zero, fmt.Errorf("parserails: document timed out after %s", timeout)
 	}
 }
 

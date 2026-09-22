@@ -114,6 +114,35 @@ func TestOfficeConversionRespectsTheTimeout(t *testing.T) {
 	}
 }
 
+func TestAwaitBoundedPrefersAFinishedOperation(t *testing.T) {
+	// The operation finished in the same instant the deadline passed. select
+	// picks at random between two ready cases, so this is run many times: a
+	// result that exists must never be thrown away for a timeout.
+	for i := 0; i < 2000; i++ {
+		done := make(chan boundedResult[int], 1)
+		done <- boundedResult[int]{value: 42}
+
+		inner, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		got, err := awaitBounded(context.Background(), inner, done, time.Second)
+		if err != nil || got != 42 {
+			t.Fatalf("iteration %d: got (%v, %v), want (42, nil)", i, got, err)
+		}
+	}
+}
+
+func TestAwaitBoundedReportsATimeoutWhenNothingFinished(t *testing.T) {
+	done := make(chan boundedResult[int], 1)
+	inner, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := awaitBounded(context.Background(), inner, done, 250*time.Millisecond); err == nil ||
+		!strings.Contains(err.Error(), "timed out after 250ms") {
+		t.Fatalf("err = %v, want a timeout", err)
+	}
+}
+
 func TestBoundedRunsInlineWithoutATimeout(t *testing.T) {
 	p := &Parser{}
 	got, err := bounded(context.Background(), p, func(ctx context.Context) (string, error) {
