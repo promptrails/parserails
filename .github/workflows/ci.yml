@@ -78,8 +78,11 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      # PDFium runs as WebAssembly, and the race detector makes every call
+      # through it several times slower. The suite shares its parsers, but
+      # the default 10-minute panic still lands well inside a cold CI run.
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -timeout 25m -coverprofile=coverage.out ./...
 
       - name: Coverage
         if: matrix.go-version == '1.27'
