@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: nothing here writes to the repository. Without this the
+# jobs inherit the repository's default token scope, which may be read/write.
+permissions:
+  contents: read
+
 env:
   GOLANGCI_VERSION: v2.13.2
 
