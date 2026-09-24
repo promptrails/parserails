@@ -43,7 +43,7 @@ func (p *Parser) withDefaults(opt ReadOptions) ReadOptions {
 }
 
 // ParseData parses a document held in memory, detecting its format from the
-// bytes (and, where those are ambiguous, from ReadOptions.Name).
+// bytes (and, where those are ambiguous, from [ReadOptions].Name).
 //
 // PDFs are parsed directly; office documents are converted with LibreOffice
 // first. Use it when a document arrives over the wire, out of an archive or an

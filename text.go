@@ -15,7 +15,7 @@ import (
 // indexing, where layout is not required.
 //
 // Scanned/image-only pages produce no text here; ExtractText does not run OCR
-// (use Parse with WithOCR for that).
+// (use [Parser.Parse] with [WithOCR] for that).
 func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
 	if f := Sniff(data); f != FormatPDF && f != FormatUnknown {
 		return "", fmt.Errorf("parserails: ExtractText wants PDF data, got %s; use ExtractTextData", f)
@@ -24,7 +24,7 @@ func (p *Parser) ExtractText(ctx context.Context, data []byte) (string, error) {
 }
 
 // ExtractTextData is the in-memory counterpart of ExtractText: it detects the
-// format, converts office documents, and honours ReadOptions (password, page
+// format, converts office documents, and honours [ReadOptions] (password, page
 // selection).
 func (p *Parser) ExtractTextData(ctx context.Context, data []byte, opt ReadOptions) (string, error) {
 	format := Detect(opt.Name, data)

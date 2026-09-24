@@ -72,7 +72,7 @@ func joinCells(row []Cell) string {
 // Use it when LibreOffice is not available or not wanted — a scratch
 // container, a lambda, a build with no system dependencies — or when the
 // document's own structure is worth more than its rendered layout. Use
-// ParseFile when you need coordinates.
+// [Parser.ParseFile] when you need coordinates.
 func ReadOfficeDocument(data []byte, format Format) (*OfficeDocument, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {

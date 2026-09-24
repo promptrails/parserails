@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -112,7 +112,7 @@ func (b *childBudget) exceeded() error {
 //
 // Implement it to teach ParseRails a container it does not know — a custom
 // archive, an EDI envelope, a proprietary wrapper — and register it with
-// WithContainer.
+// [WithContainer].
 type Container interface {
 	// Children returns the files embedded directly in data. It does not
 	// recurse: ParseRails walks the tree itself. It should stop within the
@@ -238,13 +238,15 @@ func (p *Parser) Extract(ctx context.Context, data []byte, opt ExtractOptions) (
 }
 
 // ExtractFile is the file counterpart of Extract.
-func (p *Parser) ExtractFile(ctx context.Context, filePath string, opt ExtractOptions) (*Node, error) {
-	data, _, err := readAndDetect(filePath)
+func (p *Parser) ExtractFile(ctx context.Context, path string, opt ExtractOptions) (*Node, error) {
+	data, _, err := readAndDetect(path)
 	if err != nil {
 		return nil, err
 	}
 	if opt.Name == "" {
-		opt.Name = path.Base(filePath)
+		// filepath, not path: this is a name on the local filesystem, and on
+		// Windows the separator is not a slash.
+		opt.Name = filepath.Base(path)
 	}
 	return p.Extract(ctx, data, opt)
 }

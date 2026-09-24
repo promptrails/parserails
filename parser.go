@@ -72,11 +72,11 @@ type config struct {
 func WithOCR(o OCR) Option { return func(c *config) { c.ocr = o } }
 
 // WithGranularity selects how text is segmented into Words (default
-// GranularityWord).
+// [GranularityWord]).
 func WithGranularity(g Granularity) Option { return func(c *config) { c.granularity = g } }
 
 // WithFontInfo collects per-character font size. It is off by default because it
-// roughly doubles extraction cost. Only meaningful with GranularityWord.
+// roughly doubles extraction cost. Only meaningful with [GranularityWord].
 func WithFontInfo() Option { return func(c *config) { c.fontInfo = true } }
 
 // WithPoolSize tunes the underlying PDFium worker pool.
@@ -94,7 +94,7 @@ func WithLibreOffice(path string) Option { return func(c *config) { c.sofficeBin
 // runs on pages with no extractable text at all.
 //
 // It costs one page render plus one OCR call per substantial figure, so it is
-// off by default; it needs an OCR backend (WithOCR) to do anything.
+// off by default; it needs an OCR backend ([WithOCR]) to do anything.
 func WithImageOCR() Option { return func(c *config) { c.imageOCR = true } }
 
 // WithTimeout caps how long any single document may take. Zero, the default,
@@ -130,15 +130,15 @@ func WithContainer(format Format, c Container) Option {
 
 // WithImages records the raster figures on each page (Page.Images), so
 // Markdown output can place them and callers can crop them. It costs one call
-// per page object, so it is off by default; WithImageOCR implies it.
+// per page object, so it is off by default; [WithImageOCR] implies it.
 func WithImages() Option { return func(c *config) { c.images = true } }
 
 // WithPassword sets the default password used to open encrypted documents. It
-// can be overridden per read with ReadOptions.Password.
+// can be overridden per read with [ReadOptions].Password.
 func WithPassword(password string) Option { return func(c *config) { c.password = password } }
 
 // WithMaxPages caps how many pages any single read parses. Zero (the default)
-// means no cap; it can be overridden per read with ReadOptions.MaxPages.
+// means no cap; it can be overridden per read with [ReadOptions].MaxPages.
 func WithMaxPages(n int) Option { return func(c *config) { c.maxPages = n } }
 
 // New initializes a Parser backed by a pure-Go PDFium WebAssembly runtime.
@@ -178,7 +178,7 @@ func New(opts ...Option) (*Parser, error) {
 func (p *Parser) Close() error { return p.pool.Close() }
 
 // Parse extracts every page's words with bounding boxes from the given PDF
-// data, using the parser's defaults. Use ParseData for input that may be in
+// data, using the parser's defaults. Use [Parser.ParseData] for input that may be in
 // another format, or to select pages and pass a password per call.
 func (p *Parser) Parse(ctx context.Context, data []byte) (*Document, error) {
 	if f := Sniff(data); f != FormatPDF && f != FormatUnknown {

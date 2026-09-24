@@ -28,7 +28,7 @@ type Cell struct {
 
 // Block is a classified region of a page, in reading order.
 //
-// Blocks are what Markdown output is built from. Taking them as data instead
+// Blocks are what [Document.Markdown] output is built from. Taking them as data
 // of as rendered text gives you the same decomposition with the coordinates
 // the classifier used, so a heading or a table cell can be mapped back to the
 // part of the page it came from.

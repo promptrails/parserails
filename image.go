@@ -24,7 +24,7 @@ const maxImagePixels = 100 << 20 // 100 megapixels — far past any real scan
 // screenshot — through the configured OCR backend.
 //
 // There is no PDF and no text layer here, so an OCR backend is required. The
-// result is a one-page Document whose page is the image itself: coordinates are
+// result is a one-page [Document] whose page is the image itself: coordinates are
 // in **pixels**, with the origin flipped to the bottom-left so image words obey
 // the same convention as PDF words.
 func (p *Parser) ParseImage(ctx context.Context, data []byte) (*Document, error) {

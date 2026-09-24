@@ -15,7 +15,7 @@ type Word struct {
 	X1   float64 `json:"x1"`
 	Y1   float64 `json:"y1"`
 	// FontSize is the font size in points. It is 0 unless the parser was created
-	// with WithFontInfo (and GranularityWord).
+	// with [WithFontInfo] (and [GranularityWord]).
 	FontSize float64 `json:"font_size,omitempty"`
 	// Confidence is how sure the recognizer is of this word, from 0 to 1. It is
 	// 0 for text extracted natively from the PDF, which is not a guess and
