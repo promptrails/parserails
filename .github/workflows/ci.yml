@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  GOLANGCI_VERSION: v2.13.2
+  GOLANGCI_VERSION: v2.14.0
 
 jobs:
   lint:
@@ -37,25 +37,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin
-          key: go-tools-${{ runner.os }}-go1.27
+          key: go-tools-${{ runner.os }}-golangci-${{ env.GOLANGCI_VERSION }}-go1.27.2
 
-      # Pinned, both of them. `@latest` and `@master` mean the linters change
-      # under this repository whenever upstream releases — which is a build that
-      # fails on a morning nobody touched the code. It is not hypothetical: CI
-      # was green on 2026-08-23 and red on 2026-09-16 with no commit in between,
-      # because gosec grew a rule. Bumping these is now a Dependabot pull
-      # request that can be read, not a surprise.
+      # Pinned, not `@latest`/`@master`: the linters changing under this repo
+      # whenever upstream releases is a build that fails on a morning nobody
+      # touched the code (CI was green on 2026-08-23 and red on 2026-09-16 with
+      # no commit in between, because gosec grew a rule). Built FROM SOURCE,
+      # though: golangci-lint reads the compiler's export data to typecheck, and
+      # go1.27.2 bumped that format past what the prebuilt releases ship (they
+      # are built with an older Go), so a prebuilt binary fails with "export
+      # data version 5 is greater than maximum supported version 4". `go
+      # install` recompiles it against the toolchain set up above.
       - name: Install golangci-lint
         run: |
           set -euo pipefail
           test -x ~/go/bin/golangci-lint && \
             ~/go/bin/golangci-lint version 2>/dev/null | grep -q "${GOLANGCI_VERSION#v}" && exit 0
           mkdir -p ~/go/bin
-          dir="golangci-lint-${GOLANGCI_VERSION#v}-linux-amd64"
-          curl -sSfL -o /tmp/golangci.tar.gz \
-            "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_VERSION}/${dir}.tar.gz"
-          tar -xzf /tmp/golangci.tar.gz -C /tmp
-          install -m 0755 "/tmp/${dir}/golangci-lint" ~/go/bin/golangci-lint
+          GOBIN=~/go/bin go install \
+            "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}"
           ~/go/bin/golangci-lint version
 
       - name: golangci-lint
