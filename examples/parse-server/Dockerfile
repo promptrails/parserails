@@ -3,7 +3,7 @@
 # external binaries the OCR and office features shell out to.
 # Build from the REPO ROOT so the example's `replace => ../../` resolves locally:
 #   docker build -f examples/parse-server/Dockerfile -t parserails-server .
-FROM golang:1.26 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src
 COPY . .
 WORKDIR /src/examples/parse-server

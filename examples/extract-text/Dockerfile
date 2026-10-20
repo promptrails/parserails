@@ -4,7 +4,7 @@
 # local parserails source (no need to publish the module):
 #
 #   docker build -f examples/extract-text/Dockerfile -t parserails-extract .
-FROM golang:1.26 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src
 COPY . .
 WORKDIR /src/examples/extract-text

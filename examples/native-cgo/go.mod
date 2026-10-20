@@ -1,6 +1,6 @@
 module github.com/promptrails/parserails/examples/native-cgo
 
-go 1.27.2
+go 1.27.3
 
 require github.com/promptrails/parserails v0.0.0
 

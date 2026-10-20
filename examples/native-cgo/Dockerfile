@@ -5,7 +5,7 @@
 # Build from the REPO ROOT so the example's `replace => ../../` resolves locally
 # (no need to publish the module):
 #   docker build -f examples/native-cgo/Dockerfile -t parserails-native .
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27.3-bookworm AS build
 
 # --- Install libpdfium (prebuilt) -------------------------------------------
 # Prebuilt binaries: https://github.com/bblanchon/pdfium-binaries
