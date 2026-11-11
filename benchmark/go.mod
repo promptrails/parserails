@@ -1,6 +1,6 @@
 module github.com/promptrails/parserails/benchmark
 
-go 1.27.3
+go 1.27.4
 
 replace github.com/promptrails/parserails => ../
 

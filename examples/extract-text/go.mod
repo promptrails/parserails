@@ -1,6 +1,6 @@
 module github.com/promptrails/parserails/examples/extract-text
 
-go 1.27.3
+go 1.27.4
 
 require github.com/promptrails/parserails v0.0.0
 
